@@ -1,0 +1,28 @@
+{
+  "name": "vue-design",
+  "version": "1.0.0",
+  "description": "Vue.js 设计与实现笔记",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "serve": "vitepress serve docs",
+    "preinstall": "npx only-allow pnpm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coddingus/vue-design.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/coddingus/vue-design/issues"
+  },
+  "homepage": "https://github.com/coddingus/vue-design#readme",
+  "devDependencies": {
+    "@types/node": "^17.0.18",
+    "@vue/theme": "^1.0.1",
+    "vitepress": "^0.22.2"
+  }
+}

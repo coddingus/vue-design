@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>权衡的艺术</title>
+</head>
+
+<body>
+    <!-- <div id="app" @click="alert('ok')">
+        hello world
+    </div>
+    <div id="app1" @click="alert('ok')">
+        {{content}}
+    </div> -->
+    <div id="app">
+        xxxxx
+    </div>
+</body>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+<!-- 命令式 -->
+<!-- <script>
+    $('#app')
+        .text('hello world')
+        .on(click, function () {
+            alert('ok')
+        })
+</script> -->
+<!-- <script>
+    const el = document.querySelector('#app')
+    el.innerText = 'hello world'
+    el.addEventListener('click', function () {
+        alert('ok')
+    })
+</script> -->
+<!-- 声明式 -->
+<!-- <script>
+const app = Vue.createApp({
+    data(){
+        return {
+            content: 'hello world'
+        }
+    }
+})
+app.mount('#app')
+app.content = 'hello vue3'
+</script> -->
+<script>
+    // const el = document.querySelector('#app')
+    // function fn(){
+    //     console.log('click 1')
+    // }
+    // el.addEventListener('click', fn)
+    // setTimeout(() => {
+    //     el.removeEventListener('click', fn)
+    //     el.parentNode.removeChild(el)
+    // }, 2000)
+    // const app = Vue.createApp({
+    //     data() {
+    //         return {
+    //             showEl: true
+    //         }
+    //     }
+    // })
+    // app.mount('#app')
+    // setTimeout(() => {
+    //     app.showEl = false
+    // }, 2000)
+
+    // function render(vdom, root) {
+    //     const el = document.createElement(vdom.tag)
+    //     if (typeof vdom.children === 'string') {
+    //         const text = document.createTextNode(vdom.children)
+    //         el.appendChild(text)
+    //     } else if (vdom.children) {
+    //         vdom.children.forEach(child => render(child, el))
+    //     }
+    //     root.appendChild(el)
+    // }
+    // const vdom = {
+    //     tag: 'div',
+    //     children: [{
+    //         tag: 'span',
+    //         children: 'hello world'
+    //     }]
+    // }
+    // render(vdom, document.querySelector('#app'))
+    // const el = document.createElement('div')
+    // const span = document.createElement('span')
+    // span.innerText = 'hello world'
+    // el.appendChild(span)
+    // document.querySelector('#app').appendChild(el)
+</script>
+<script>
+    const {ref} = Vue
+    const app = Vue.createApp({
+    data(){
+        return {
+            content: 'hello world'
+        }
+    }
+})
+const count = ref(0)
+console.log(count)
+app.mount('#not-exits')
+</script>
+</html>
