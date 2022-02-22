@@ -1,0 +1,21 @@
+{
+  "name": "1",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "rollup src/index.js -o dist/bundle.js -f esm",
+    "webpack": "webpack"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "rollup": "^2.67.3",
+    "webpack": "^5.69.1",
+    "webpack-cli": "^4.9.2"
+  },
+  "dependencies": {
+    "vue": "^3.2.31"
+  }
+}

@@ -95,16 +95,17 @@ app.content = 'hello vue3'
     // document.querySelector('#app').appendChild(el)
 </script>
 <script>
-    const {ref} = Vue
+    const { ref } = Vue
     const app = Vue.createApp({
-    data(){
-        return {
-            content: 'hello world'
+        data() {
+            return {
+                content: 'hello world'
+            }
         }
-    }
-})
-const count = ref(0)
-console.log(count)
-app.mount('#not-exits')
+    })
+    // const count = ref(0)
+    // console.log(count)
+    app.mount('#not-exit111s')
 </script>
+
 </html>

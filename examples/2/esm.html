@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>框架设计的核心要素</title>
+</head>
+
+<body>
+    <!-- <div id="app" @click="alert('ok')">
+        hello world
+    </div>
+    <div id="app1" @click="alert('ok')">
+        {{content}}
+    </div> -->
+    <div id="app">
+        {{content}}
+    </div>
+</body>
+<script type="module" src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.esm-browser.js"></script>
+<!-- <script type="module">
+    import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.esm-browser.js'
+    const app = createApp({
+        data() {
+            return {
+                content: 'hello world'
+            }
+        }
+    })
+    app.mount('#app')
+</script> -->
+</html>
