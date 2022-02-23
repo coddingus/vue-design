@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <div id="app"></div>
+    <div id="component"></div>
+    <div id="objComponent"></div>
+
+    <div id="classComponent"></div>
+</body>
+<script>
+    const vnode = {
+        tag: 'div',
+        props: {
+            onClick: function () {
+                alert('click')
+            },
+            class: 'hello'
+        },
+        children: 'click me'
+    }
+    function mountElement(vnode, container) {
+        // 根据标签名创建对应的 DOM 
+        const el = document.createElement(vnode.tag)
+        // 遍历 props 属性，将属性、事件添加到 DOM 上
+        for (const key in vnode.props) {
+            const props = vnode.props
+            // 以 on 开头说明是事件
+            if (/^on/.test(key)) {
+                el.addEventListener(key.substr(2).toLocaleLowerCase(), props[key])
+            } else {
+                // 设置 DOM 属性
+                el.setAttribute(key, props[key])
+            }
+        }
+        const children = vnode.children
+        // children 是字符串，说明是文本节点
+        if (typeof children === 'string') {
+            el.appendChild(document.createTextNode(children))
+        } else if (Array.isArray(children)) {
+            // 存在子节点，挂载子节点
+            children.forEach(child => render(child, el))
+        }
+        // 将 DOM 添加到容器下
+        container.appendChild(el)
+    }
+    function mountComponent(vnode, container) {
+        const tag = vnode.tag
+        let subtree
+        if (typeof tag === 'function') {
+            if (/^class/.test(tag.toString() )) {
+                let cor = new tag()
+                subtree = cor.render()
+            } else {
+                subtree = tag()
+            }
+
+        } else if (typeof tag === 'object') {
+            subtree = tag.render()
+        } else {
+            const component = new subtree.tag()
+            subtree = component.render()
+        }
+        render(subtree, container)
+
+    }
+    function render(vnode, container) {
+        const tag = vnode.tag
+        if (typeof tag === 'string') {
+            mountElement(vnode, container)
+        } else {
+            mountComponent(vnode, container)
+        }
+    }
+
+    const myComponent = function () {
+        return {
+            tag: 'div',
+            props: {
+                onClick: function () {
+                    alert('click')
+                },
+                class: 'hello'
+            },
+            children: 'Component'
+        }
+    }
+    const objComponent = {
+        render() {
+            return {
+                tag: 'div',
+                props: {
+                    onClick: function () {
+                        alert('click')
+                    },
+                    class: 'hello'
+                },
+                children: 'objComponent'
+            }
+        }
+    }
+    class ClassComponent {
+        render() {
+            return {
+                tag: 'div',
+                props: {
+                    onClick: function () {
+                        alert('click')
+                    },
+                    class: 'hello'
+                },
+                children: 'classComponent'
+            }
+        }
+    }
+    render(vnode, document.querySelector('#app'))
+    const componentVnode = {
+        tag: myComponent
+    }
+
+    const objComponentVnode = {
+        tag: objComponent
+    }
+    const classComponentVnode = {
+        tag: ClassComponent
+    }
+    render(componentVnode, document.querySelector('#component'))
+    render(objComponentVnode, document.querySelector('#objComponent'))
+    render(classComponentVnode, document.querySelector('#classComponent'))
+
+
+</script>
+
+</html>

@@ -6,10 +6,21 @@ export default defineConfig({
   base: '/vue-design',
   srcDir: 'src',
   outDir: '../dist',
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
+  ],
   themeConfig: {
+    logo: '/logo.svg',
     nav: [
       { text: '首页', link: '/' },
       { text: '指南', link: '/design/art' },
+      {
+        text: '相关链接',
+        items: [
+          { text: 'Vue.js 文档', link: 'https://vuejs.org' },
+          { text: 'Vue.js 2 文档', link: 'https://v2.vuejs.org' }
+        ]
+      },
       { text: 'Github', link: 'https://github.com/coddingus/vue-design' },
     ],
     sidebar: {
