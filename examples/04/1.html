@@ -43,11 +43,26 @@
     // effect()
 
     effect(() => {
+        console.log('effect run')
         document.body.innerText = obj.text
     })
     setTimeout(() => {
-        obj.text = 'hello vue3'
-    }, 1000)
+        obj.notExits = 'hello vue3'
+    })
+    // setTimeout(() => {
+    //     obj.text = 'hello vue3'
+    // }, 1000)
+    const map = new Map()
+    const weakmap = new WeakMap()
+    function fn() {
+        const foo = {name: 'foo'}
+        const bar = {name: 'bar'}
+        map.set(foo, 1)
+        weakmap.set(bar, 2)
+    }
+    fn()
+    console.log(map)
+    console.log(weakmap)
 </script>
 
 </html>

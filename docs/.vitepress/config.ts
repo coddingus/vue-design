@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress'
+import { defineConfigWithTheme } from 'vitepress'
 
 export default defineConfig({
   title: 'Vue.js 设计与实现',

@@ -99,3 +99,154 @@ const obj = new Proxy(data, {
     }
 })
 ```
+然后我们再对上面代码进行测试，当我们访问一个不存在的属性时
+```js
+effect(() => {
+    console.log('effect run')
+    document.body.innerText = obj.text
+})
+setTimeout(() => {
+    obj.notExist = 'hello vue3'
+})
+```
+运行上面代码时，我们会发现控制台打印了两次 `effect run` ，而我们 obj.text 的值并未发生修改，而我们是希望仅当 text 值发生改变是，才会重新触发匿名函数的执行。导致该问题的原因是没有在副作用函数和被操作的字段之间建立明确的联系，解决方法很简单，只需要在副作用函数与被操作的字段建立联系即可。
+
+我们再来看下面代码
+```js
+effect(function effectFn() {
+    document.body.innerText = obj.text
+})
+```
+代码中存在三个角色
+* 被操作的代理对象 obj
+* 被操作的字段 text
+* 使用 effect 函数注册的副作用函数 effectFn
+
+如果用 target 来表示代理对象所代理的原始值，用 key 字段来表示被操作的字段名，用 effectFn 来表示被注册的副作用函数，那么可以为这三个角色建立如下关系
+```
+target
+  └── key
+       └── effectFn
+```
+有两个副作用函数读取同一个对象
+```js
+effect(function effectFn1() {
+    document.body.innerText = obj.text
+})
+effect(function effectFn2() {
+    console.log(obj.text)
+})
+```
+那么对应关系就是:
+```
+target
+  └── text
+       ├── effectFn1
+       └── effectFn2
+```
+一个副作用函数读取了同一对象上的两个属性
+```js
+effect(function effectFn() {
+    console.log(obj.text1)
+    console.log(obj.text2)
+})
+```
+那么对应关系就是:
+```
+target
+  └── text1
+      └──  effectFn
+  └── text2
+      └──  effectFn
+```
+实现思路如下
+* 首先使用 bucket 来存储副作用函数， bucket 使用 WeakMap
+* 当触发代理对象的 get 方法时，我们可以获取到 target 、key
+  * 将 target 作为 key 存储到 bucket 上, 值为 depsMap，数据结构是 Map 
+  * 将 key 作为 key ，deps 为值depsMap 中
+  * 将副作用函数添加到 deps 中 
+
+![](/04/reactivity.png)
+
+
+实现代码如下：
+```js
+const bucket = new WeakMap()
+const obj = new Proxy(data, {
+    get(target, key) {
+        if (activeEffect) {
+            let depsMap = bucket.get(target)
+            if (!depsMap) {
+                bucket.set(target, (depsMap = new Map()))
+            }
+            let deps = depsMap.get(key)
+            if (!deps) {
+                depsMap.set(key, (deps = new Set()))
+            }
+            deps.add(activeEffect)
+        }
+        return target[key]
+    },
+    set(target, key, newVal) {
+        target[key] = newVal
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        const deps = depsMap.get(key)
+        deps && deps.forEach(fn => fn())
+        return true
+    }
+})
+```
+接下来，再对上面代码进行封装。我们把拦截的逻辑都写在了 get 和 set 方法中，但更好的做法是吧这部分逻辑封装到一个函数中。
+```js
+ // get 拦截函数内调用 track 函数触发追踪变化
+function track(target, key) {
+    if (!activeEffect) return
+    let depsMap = bucket.get(target)
+    if (!depsMap) {
+        bucket.set(target, (depsMap = new Map()))
+    }
+    let deps = depsMap.get(key)
+    if (!deps) {
+        depsMap.set(key, (deps = new Set()))
+    }
+    deps.add(activeEffect)
+}
+
+// set 拦截函数内调用 trigger 函数触发变化
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    deps && deps.forEach(fn => fn())
+}
+
+const obj = new Proxy(data, {
+    get(target, key) {
+        track(target, key)
+        return target[key]
+    },
+    set(target, key, newVal) {
+        target[key] = newVal
+        trigger(target, key)
+        return true
+    }
+})
+```
+这样我们就将追踪变化函数封装到 track 中，触发逻辑封装到 trigger 函数中
+
+接下来说下为什么 bucket 要使用 [WeakMap](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/WeakMap) ，先看下面代码
+```js
+const map = new Map()
+const weakmap = new WeakMap()
+function fn() {
+    const foo = {name: 'foo'}
+    const bar = {name: 'bar'}
+    map.set(foo, 1)
+    weakmap.set(bar, 2)
+}
+fn()
+console.log(map)
+console.log(weakmap)
+```
+当函数 fn 执行完毕后，对于 foo 对象来说，它依然作为 map 的 key 被引用着，因此垃圾回收器不会把它从内存中移除，我们依然可以在控制台看到 map 中存在 key 为 foo 对象的属性；由于 WeakMap 是弱类型引用，他不会影响垃圾回收器的工作，所以一旦函数 fn 执行完毕，就会把 bar 对象从内存中移除，并且 weakmap 中也不会存在 bar 对象这个属性 
