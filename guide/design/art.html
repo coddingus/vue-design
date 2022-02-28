@@ -7,7 +7,7 @@
     <meta name="description" content="《Vue.js 设计与实现》笔记">
     <link rel="stylesheet" href="/vue-design/assets/style.298c1d36.css">
     <link rel="modulepreload" href="/vue-design/assets/app.43db1add.js">
-    <link rel="modulepreload" href="/vue-design/assets/guide_design_art.md.ebbe7ea6.lean.js">
+    <link rel="modulepreload" href="/vue-design/assets/guide_design_art.md.ce9329c2.lean.js">
     
     <link rel="icon" type="image/svg+xml" href="/logo.svg">
   <meta name="twitter:title" content="权衡的艺术 | Vue.js 设计与实现">
@@ -19,7 +19,7 @@
     <span class="token punctuation">.</span><span class="token function">on</span><span class="token punctuation">(</span>click<span class="token punctuation">,</span> <span class="token keyword">function</span> <span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
         <span class="token function">alert</span><span class="token punctuation">(</span><span class="token string">&#39;ok&#39;</span><span class="token punctuation">)</span>
     <span class="token punctuation">}</span><span class="token punctuation">)</span>
-</code></pre></div><p>下面使用原生的JavaScript代码实现同样的功能</p><div class="language-js"><pre><code><span class="token keyword">const</span> el <span class="token operator">=</span> document<span class="token punctuation">.</span><span class="token function">querySelector</span><span class="token punctuation">(</span><span class="token string">&#39;#app&#39;</span><span class="token punctuation">)</span>
+</code></pre></div><p>下面使用原生的 JavaScript 代码实现同样的功能</p><div class="language-js"><pre><code><span class="token keyword">const</span> el <span class="token operator">=</span> document<span class="token punctuation">.</span><span class="token function">querySelector</span><span class="token punctuation">(</span><span class="token string">&#39;#app&#39;</span><span class="token punctuation">)</span>
 el<span class="token punctuation">.</span>innerText <span class="token operator">=</span> <span class="token string">&#39;hello world&#39;</span>
 el<span class="token punctuation">.</span><span class="token function">addEventListener</span><span class="token punctuation">(</span><span class="token string">&#39;click&#39;</span><span class="token punctuation">,</span> <span class="token keyword">function</span> <span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
     <span class="token function">alert</span><span class="token punctuation">(</span><span class="token string">&#39;ok&#39;</span><span class="token punctuation">)</span>
@@ -78,7 +78,7 @@ span<span class="token punctuation">.</span>innerText <span class="token operato
 el<span class="token punctuation">.</span><span class="token function">appendChild</span><span class="token punctuation">(</span>span<span class="token punctuation">)</span>
 document<span class="token punctuation">.</span><span class="token function">querySelector</span><span class="token punctuation">(</span><span class="token string">&#39;#app&#39;</span><span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">appendChild</span><span class="token punctuation">(</span>el<span class="token punctuation">)</span>
 </code></pre></div><p>这样就变成了纯编译时的框架，不支持任何运行时的内容，用户的代码只有编译后才能运行。这种性能会比较好，但确实了灵活性 <a href="https://www.sveltejs.cn" target="_blank" rel="noopener noreferrer">Svelte</a> 就是纯编译时的框架，但是它的真实性能可能达不到理论高度</p></div></div><footer class="page-footer" data-v-70cd7a5b data-v-7c1f404e><div class="edit" data-v-7c1f404e><div class="edit-link" data-v-7c1f404e data-v-760d8fa8><!----></div></div><div class="updated" data-v-7c1f404e><!----></div></footer><div class="next-and-prev-link" data-v-70cd7a5b data-v-e2088930><div class="container" data-v-e2088930><div class="prev" data-v-e2088930><!----></div><div class="next" data-v-e2088930><a class="link" href="/vue-design/guide/design/elements" data-v-e2088930><span class="text" data-v-e2088930>框架设计的核心要素</span><svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 24 24" class="icon icon-next" data-v-e2088930><path d="M19.9,12.4c0.1-0.2,0.1-0.5,0-0.8c-0.1-0.1-0.1-0.2-0.2-0.3l-7-7c-0.4-0.4-1-0.4-1.4,0s-0.4,1,0,1.4l5.3,5.3H5c-0.6,0-1,0.4-1,1s0.4,1,1,1h11.6l-5.3,5.3c-0.4,0.4-0.4,1,0,1.4c0.2,0.2,0.5,0.3,0.7,0.3s0.5-0.1,0.7-0.3l7-7C19.8,12.6,19.9,12.5,19.9,12.4z"></path></svg></a></div></div></div><!--[--><!--]--></div></main></div><!----><!--]--></div>
-    <script>__VP_HASH_MAP__ = JSON.parse("{\"guide_design_art.md\":\"ebbe7ea6\",\"guide_design_elements.md\":\"19425969\",\"guide_design_thinking.md\":\"209cd0c7\",\"guide_reactivity_function-and-realization.md\":\"6f0d3098\",\"guide_reactivity_non-original.md\":\"08a4acf8\",\"guide_reactivity_original.md\":\"e11d1141\",\"index.md\":\"d570140d\"}")</script>
+    <script>__VP_HASH_MAP__ = JSON.parse("{\"guide_design_art.md\":\"ce9329c2\",\"guide_design_elements.md\":\"19425969\",\"guide_design_thinking.md\":\"209cd0c7\",\"guide_reactivity_function-and-realization.md\":\"3dae69b3\",\"guide_reactivity_non-original.md\":\"08a4acf8\",\"guide_reactivity_original.md\":\"e11d1141\",\"index.md\":\"d570140d\"}")</script>
     <script type="module" async src="/vue-design/assets/app.43db1add.js"></script>
     
   </body>
