@@ -19,7 +19,7 @@ $('#app')
         alert('ok')
     })
 ```
-下面使用原生的JavaScript代码实现同样的功能
+下面使用原生的 JavaScript 代码实现同样的功能
 ```js
 const el = document.querySelector('#app')
 el.innerText = 'hello world'

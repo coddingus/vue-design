@@ -250,3 +250,147 @@ console.log(map)
 console.log(weakmap)
 ```
 当函数 fn 执行完毕后，对于 foo 对象来说，它依然作为 map 的 key 被引用着，因此垃圾回收器不会把它从内存中移除，我们依然可以在控制台看到 map 中存在 key 为 foo 对象的属性；由于 WeakMap 是弱类型引用，他不会影响垃圾回收器的工作，所以一旦函数 fn 执行完毕，就会把 bar 对象从内存中移除，并且 weakmap 中也不会存在 bar 对象这个属性 
+## 分支切换与 cleanup
+### 分支切换
+首先需要了解下什么是分支切换
+```js
+const data = {
+    ok: true,
+    text: 'hello world'
+}
+const obj = new Proxy(data, {/*...*/})
+
+effect(() => {
+    console.log('effect')
+    document.body.innerHTML = obj.ok ? obj.text: 'not'
+})
+```
+副作用函数内部存在一个三元表达式，根据 obj.ok 值的不同会执行不同的代码分支。当 obj.ok 的值发生改变时，代码执行的分支就会发生改变，这就是所谓的分支切换。
+### 建立关联
+分支切换会产生遗留的副作用函数。执行上面的代码，obj.ok 为 true，此时就会触发 obj.ok 和 obj.text 这两个属性的读取操作，此时的副作用函数 effectFn 与响应式数据的关系如下
+```
+data
+  └── ok
+      └──  effectFn
+  └── text
+      └──  effectFn
+```
+当修改 obj.ok 的值为 false 时，会触发副作用函数重新执行，由于此时 obj.text 不会被读取，只会触发 obj.ok 的读取操作，所以理想情况下此时 effectFn 与响应式的数据如下
+```
+data
+  └── ok
+      └──  effectFn
+```
+很明显，按照之前写的，还实现不了这一点。
+
+解决这个问题思路也很简单，我们每次执行副作用函数时，删除掉之前的依赖关系，重新建立依赖关系就可以了。
+
+首先，要将一个副作用函数从所有与之关联的依赖集合中移除，就需要明确知道哪些依赖集合中是否包含它，所以需要副作用函数与依赖集合间建立联系
+```js
+let activeEffect
+// 将副作用函数添加一个 deps 数组，用来存储与该副作用函数相关的依赖集合
+function effect(fn) {
+    function effectFn() {
+        activeEffect = effectFn
+        fn()
+    }
+    effectFn.deps = []
+    effectFn()
+}
+```
+在 track 函数执行时，可以把当前依赖集合添加到当前副作用函数的 deps 数组中，这样联系就建立起来了
+```diff
+function track(target, key) {
+    if (!activeEffect) return
+    let depsMap = bucket.get(target)
+    if (!depsMap) {
+        bucket.set(target, (depsMap = new Map()))
+    }
+    let deps = depsMap.get(key)
+    if (!deps) {
+        depsMap.set(key, (deps = new Set()))
+    }
+    // 把当前激活的副作用函数添加到依赖集合 deps 中
+    deps.add(activeEffect)
++    // 将当前的依赖集合添加到 deps数组中
++    activeEffect.deps.push(deps)
+}
+```
+### cleanup
+建立联系后，每次执行副作用函数时， 根据副作用函数的 deps 数组中删除掉所有相关联的集合。
+
+我们将清除工作放到 cleanup 函数中
+```diff
+let activeEffect
+// 将副作用函数添加一个 deps 数组，用来存储与该副作用函数相关的依赖集合
+function effect(fn) {
+    function effectFn() {
+        activeEffect = effectFn
+        // 清除工作
++        cleanup(activeEffect)
+        fn()
+    }
+    effectFn.deps = []
+    effectFn()
+}
+```
+下面是 cleanup 函数的实现
+```js
+function cleanup(effectFn){
+    for(let i = 0; i < effectFn.deps.length; i++){
+        const deps = effectFn.deps[i]
+        // 把 effectFn 从依赖集合中删除
+        deps.delete(effectFn)
+    }
+    // 重置数组
+    effectFn.deps.length = 0
+}
+```
+
+然后执行代码，我们会发现，会发现会导致无限循环，会出现下面报错信息
+```
+Uncaught RangeError: Maximum call stack size exceeded
+```
+出现的原因就在我们写的 trigger 函数中
+```js
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    // 问题出现在这里
+    deps && deps.forEach(fn => fn())
+}
+```
+我们遍历 deps 集合，会执行下面几个步骤
+1. 执行集合中存储的副作用函数 effectFn
+2. 副作用函数执行过程中，会调用 cleanup 清除相关依赖
+3. 然后在调用我们传入的副作用函数 fn
+4. 执行我们传入的副作用函数 fn 时，会导致重新被收集到依赖中
+
+实际上执行过程就跟下面的类似
+```js
+const set = new Set([1])
+set.forEach(() => {
+    set.delete(1)
+    set.add(1)
+    console.log('遍历中')
+}) 
+```
+执行代码后，我们发现一直无限打印 '遍历中'
+
+::: tip 语言规范说明
+在调用 forEach 遍历 Set 集合时，如果一个值已经被访问过了，但该值被删除并重新添加到集合中，如果此时遍历没有结束，那么该值会被重新访问
+:::
+
+解决办法很简单，可以另外构造一个 Set 集合并遍历它
+```js
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    const effectsToRun = new Set(deps)
+    effectsToRun && effectsToRun.forEach(fn => fn())
+}
+```
+执行过程中，依赖删除和增加是不会影响到 effectsToRun 的，所以就不会出现无限循环了
+## 嵌套的 effect 与 effect 栈
