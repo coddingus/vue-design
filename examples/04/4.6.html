@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>避免无限递归循环</title>
+</head>
+
+<body>
+
+</body>
+<script>
+    let activeEffect
+    const effectStack = []
+    function effect(fn) {
+        function effectFn() {
+            activeEffect = effectFn
+            effectStack.push(effectFn)
+            cleanup(effectFn)
+            fn()
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length - 1]
+        }
+        effectFn.deps = []
+        effectFn()
+    }
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        // 重置数组
+        effectFn.deps.length = 0
+    }
+
+    const bucket = new WeakMap()
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+        if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()))
+        }
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+        // 把当前激活的副作用函数添加到依赖集合 deps 中
+        deps.add(activeEffect)
+        // 将当前的依赖集合添加到 deps数组中
+        activeEffect.deps.push(deps)
+    }
+    function trigger(target, key) {
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        const deps = depsMap.get(key)
+        const effectsToRun = new Set()
+        deps && deps.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+        effectsToRun.forEach(fn => fn())
+    }
+    function proxy(data) {
+        return new Proxy(data, {
+            get(target, key) {
+                track(target, key)
+                return target[key]
+            },
+            set(target, key, newVal) {
+                target[key] = newVal
+                trigger(target, key)
+                return true
+            }
+        })
+    }
+
+</script>
+<script>
+    const data = {
+        foo: 0
+    }
+    const obj = proxy(data)
+    setTimeout(() => {
+        effect(() => {
+            obj.foo++
+            document.body.innerHTML = obj.foo
+        })
+    }, 1000)
+
+</script>
+
+</html>

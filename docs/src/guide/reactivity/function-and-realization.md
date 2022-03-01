@@ -394,3 +394,534 @@ function trigger(target, key) {
 ```
 执行过程中，依赖删除和增加是不会影响到 effectsToRun 的，所以就不会出现无限循环了
 ## 嵌套的 effect 与 effect 栈
+effect 是可以发生嵌套的，例如
+```js
+effect(function effectFn1() {
+    /*... */
+    effect(function effectFn2() {
+        /*... */
+    })
+})
+```
+什么场景会发生 effect 嵌套呢？实际上 Vue.js 的渲染函数就是在 effect 中执行的
+```js
+const Foo = {
+    render() {
+        return /* ... */
+    }
+}
+```
+在一个 effect 函数中执行 Foo 组件的渲染函数
+```js
+effect(() => {
+    Foo.render()
+})
+```
+当组件发生嵌套时
+```js
+const Bar = {
+    render() {
+        return /* .... */
+    }
+}
+
+const Foo = {
+    render() {
+        return <Bar/>
+    }
+}
+```
+此时将相当于
+```js
+effect(() => {
+    // 嵌套
+    effect(() => {
+        Bar.render()
+    })
+})
+```
+所以 effect 函数应该设计成可嵌套的
+
+```js
+const data = {
+    foo: 'foo',
+    bar: 'bar'
+}
+const obj = new Proxy(data, {/*...*/})
+effect(function effectFn1() {
+    console.log('effectFn1 执行')
+    effect(function effectFn2() {
+        console.log('effectFn2 执行')
+        document.querySelector('#bar').innerHTML =  obj.bar
+    })
+    document.querySelector('#foo').innerHTML = obj.foo
+})
+```
+理想情况下，我们希望的副作用函数与对象属性间的联系
+```js
+data
+  └── foo
+       └──  effectFn1
+  └── bar
+       └──  effectFn2
+```
+当修改 obj.bar 时，会打印：
+```
+effectFn2 执行
+```
+很明显，不符合我们的预期，问题就出在 effect 函数 和 activeEffect 上，当我们使用 activeEffect 来存储副作用函数时，意味着同时只能有一个副作用函数，当副作用嵌套时，内层副作用函数就会覆盖外层 activeEffect 的值
+```js
+let activeEffect
+function effect(fn) {
+
+    function effectFn() {
+        activeEffect = effectFn
+        cleanup(effectFn)
+        fn()
+    }
+    effectFn.deps = []
+    effectFn()
+}
+```
+为了解决这个问题，我们需要一个副作用函数栈，当副作用函数执行时，就会将 activeEffect 压入栈中，执行完毕后，在把 activeEffect 从栈中弹出
+
+![](/04/effect-stack.png)
+
+## 避免无限递归循环
+当我们执行下面代码时:
+```js
+effect(() => {
+    obj.foo++
+})
+```
+控制台会抛出异常
+```
+Uncaught RangeError: Maximum call stack size exceeded
+```
+上面的代码中我们既会读取 foo 的值，也会设置 foo 的值
+1. 执行副作用函数，首先读取 foo 的值，会触发 track 操作
+2. 设置 foo 的值，会触发 trigger 操作
+3. 这时该副作用函数还没有执行完毕， trigger 函数中执行过程中会再次触发执行副作用函数。
+4. 执行副作用函数又回到了第 1 步，导致无限调用自己
+
+对此，我们可以对 trigger 函数增加守卫条件： 如果 trigger 函数触发执行的副作用函数与当前正在执行的副作用函数相同，则不触发执行该副作用函数
+```js
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    const effectsToRun = new Set()
+    // 遍历往 effectsToRun 上添加副作用函数
+    deps && deps.forEach(effectFn => {
+        // 如果当前执行的副作用函数 activeEffect 与当前
+        // 遍历到的副作用函数effectFn 相同，就不添加
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    effectsToRun.forEach(effectFn => effectFn())
+}
+```
+这样就解决了无限递归循环的问题
+## 调度执行
+可调度性是响应式系统的非常重要的一个特性。
+:::tip 什么是可调度
+就是当 trigger 动作触发副作用函数执行时，有能力决定副作用函数的时机、次数以及方式。
+:::
+为了调用方便，我们把代理对象给封装到一个函数中
+```js
+function proxy(data) {
+    return new Proxy(data, {
+        get(target, key) {
+            track(target, key)
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            trigger(target, key)
+            return true
+        }
+    })
+}
+```
+看下面代码
+```js
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+effect(() => {
+    console.log(obj.foo)
+})
+obj.foo++
+console.log('结束啦')
+```
+执行结果是
+```
+1
+2
+结束啦
+```
+假设需求有变，输出的顺序需要调整为
+```
+1
+结束啦
+2
+```
+
+我们可能会修改代码的顺序，但是有什么办法可以不修改代码就能拿实现上面的需求呢？这时就需要我们设计的响应式系统支持可调度
+
+我们可以为我们的 effect 函数设计一个选项参数 options ，允许用户指定调度器
+```js
+effect(
+    () => {
+        console.log(obj.foo)
+    },
+    // options
+    {
+        // 调度器 scheduler 是一个函数
+        scheduler(fn) {
+
+        }
+    }
+)
+```
+同时，effect 函数需要支持第二个参数的传递，并将 options 选项挂载到副作用函数 effetcFn
+```js
+let activeEffect
+const effectStack = []
+function effect(fn, options = {}) {
+    function effectFn() {
+        cleanup(effectFn)
+        activeEffect = effectFn
+        effectStack.push(effectFn)
+        fn()
+        effectStack.pop()
+        activeEffect = effectStack[effectStack.length - 1]
+    }
+    // 将 options 挂载到 effectFn 上
+    effectFn.options = options
+    effectFn.deps = []
+    effectFn()
+}
+```
+我们在trigger 函数中执行副作用函数时，就可以拿到 options.scheduler 选项
+```js
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    const effectsToRun = new Set()
+    deps && deps.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    effectsToRun.forEach(effectFn => {
+        // 存在调度器，就调用调度器，并把副作用函数作为参数传递
+        // 否则，就直接执行副作用函数
+        if (effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn)
+        } else {
+            effectFn()
+        }
+    })
+}
+```
+我们再来实现之前的需求
+```js
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+effect(
+    () => {
+        console.log(obj.foo)
+    },
+    // options
+    {
+        // 调度器 scheduler 是一个函数
+        scheduler(fn) {
+            setTimeout(fn)
+        }
+    }
+)
+obj.foo++
+console.log('结束啦')
+```
+执行后
+```
+1
+结束啦
+2
+```
+同样，通过调度器还可以控制它的执行次数，例如下面代码
+```js
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+effect(
+    () => {
+        console.log(obj.foo)
+    }
+)
+obj.foo++
+obj.foo++
+```
+如果我们只关心结果，不关心过程，我们期望打印结果为
+```
+1
+3
+```
+我们自己设计一个任务队列函数
+```js
+const jobQueue = new Set()
+const p = Promise.resolve()
+let isFlushing = false
+function flushJob() {
+    if (isFlushing) return
+    isFlushing = true
+    p.then(() => {
+        jobQueue.forEach(job => {
+            job()
+        })
+    }).finally(() => {
+        {
+            isFlushing = false
+        }
+    })
+}
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+effect(
+    () => {
+        console.log(obj.foo)
+    },
+    {
+        scheduler(effectFn){
+            jobQueue.add(effectFn)
+            flushJob()
+        }
+    }
+)
+obj.foo++
+obj.foo++
+```
+当我们修改 foo 的值时
+* 会触发 scheduler 函数， 会将副作用函数添加到任务队列 flushJob 上，最终会遍历执行 flushJob 上的副作用函数
+* 再次修改 foo 的值时，调用 flushJob 时，isFlushing 为 true，所以不会触发执行副作用函数
+* 所以 flushJob 上值只存在一个副作用函数
+* 由于 flushJob 的执行是异步的，所以，在执行副作用时， foo 的值就已经是 3 了
+
+所以控制台会打印
+```
+1
+3
+```
+## 计算属性 computed 与 lazy
+在之前我们设计的 effect 函数，调用effect 函数便会执行我们传递的副作用函数
+```js
+effect(() => {
+    console.log(obj.foo)
+})
+```
+在有些场景下，我们不希望在调用 effect 函数时执行传递的副作用函数，而是在需要它执行的时候再执行，这就是懒执行的 effect 。例如我们希望我们指定 options.lazy 为 true 时需要懒执行的 effect
+```js
+effect(() => {
+    console.log(obj.foo)
+}, {
+    lazy: true
+})
+```
+下面修改 effect 函数
+```js
+let activeEffect
+const effectStack = []
+function effect(fn, options = {}) {
+    function effectFn() {
+        cleanup(effectFn)
+        activeEffect = effectFn
+        effectStack.push(effectFn)
+        fn()
+        effectStack.pop()
+        activeEffect = effectStack[effectStack.length - 1]
+    }
+    effectFn.options = options
+    effectFn.deps = []
+    // 非lazy才执行副作用函数
+    if (!options.lazy) {
+        effectFn()
+    }
+    return effectFn
+}
+```
+这样就实现手动调用 effect 函数了
+```js
+const effectFn = effect(() => {
+    console.log(obj.foo)
+}, {
+    lazy: true
+})
+
+setTimeout(() => {
+    effectFn()
+}, 1000)
+```
+但是，如果仅仅可以手动执行 effect 函数，意义不大，如果我们传递给 effect 函数看做一个 getter , 那么 getter 函数可以返回任何值
+```js
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+const effectFn = effect(() => {
+    console.log(obj.foo)
+}, {
+    lazy: true
+})
+
+
+setTimeout(() => {
+    // value 就是getter 的返回值
+    const value = effectFn()
+    console.log(value)
+}, 1000)
+```
+我们需要对 effect 进行修改
+```diff
+ let activeEffect
+ const effectStack = []
+ function effect(fn, options = {}) {
+     function effectFn() {
+         cleanup(effectFn)
+         activeEffect = effectFn
+         effectStack.push(effectFn)
++        const res = fn()
+         effectStack.pop()
+         activeEffect = effectStack[effectStack.length - 1]
++        // 返回副作用函数执行的结果
++        return res
+     }
+     effectFn.options = options
+     effectFn.deps = []
+     if (!options.lazy) {
+         effectFn()
+     }
+     return effectFn
+ }
+```
+这样我们就拿到了传递给 effect 的富作用函数的返回值了
+
+执行下面代码
+```js
+const data = {
+    a: 1,
+    b: 2
+}
+const obj = proxy(data)
+const effectFn = effect(() => {
+    return {
+        value: obj.a + obj.b
+    }
+}, {
+    lazy: true
+})
+
+
+setTimeout(() => {
+    // value 就是getter 的返回值
+    const value = effectFn()
+    console.log(value)
+}, 1000)
+```
+如果我们将上面代码，稍加改造，就成了我们熟悉使用的计算属性 computed 了
+```js
+function computed(getter){
+    const effectFn = effect(getter, {
+        lazy: true
+    })
+    const obj = {
+        get vale(){
+            return effectFn()
+        }
+    }
+    return obj
+}
+```
+运行下面代码
+```js
+const data = {
+    a: 1,
+    b: 2
+}
+const obj = proxy(data)
+const data = {
+    a: 1,
+    b: 2
+}
+const obj = proxy(data)
+const count = computed(() =>{
+    return obj.a + obj.b
+})
+console.log(count.value) // 3
+```
+就这样，计算属性的功能就实现了。不过现在计算属性的值只做到了懒加载（当调用 count.value 的是时候才会去执行计算），并没有做到对值进行缓存。我们多次进行访问，它就会进行多次计算
+```js
+console.log(count.value) // 3
+console.log(count.value) // 3
+console.log(count.value) // 3
+```
+下面对 computed 函数进行修改
+```js
+function computed(getter) {
+    const effectFn = effect(getter, {
+        lazy: true
+    })
+    let value
+    let dirty = true
+    const obj = {
+        get value() {
+            if(dirty){
+                value = effectFn()
+                dirty = false
+            }
+            return value
+        }
+    }
+    return obj
+}
+```
+修改完后，我们发现再次修改 obj.foo 或 obj.bar 的值时，返回值没有发生变化
+```js
+console.log(count.value) // 3
+obj.a++
+console.log(count.value)// 3
+```
+这是因为第一次访问 count.value 的值后，dirty 变成了 false ，只有当 dirty 为 true 时，才会重新计算
+
+我们需要，但我们修改 obj.foo 或 obj.bar 的值发生变化时，dirty 重新变为 true
+```js
+function computed(getter) {
+    let value
+    let dirty = true
+    const effectFn = effect(getter, {
+        lazy: true,
+        scheduler(fn){
+            dirty = true
+        }
+    })
+
+    const obj = {
+        get value() {
+            if (dirty) {
+                value = effectFn()
+                dirty = false
+            }
+            return value
+        }
+    }
+    return obj
+}
+```

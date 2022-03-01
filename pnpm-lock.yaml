@@ -3,12 +3,12 @@ lockfileVersion: 5.3
 specifiers:
   '@types/node': ^17.0.18
   '@vue/theme': ^1.0.1
-  vitepress: ^0.22.2
+  vitepress: 0.22.3
 
 devDependencies:
   '@types/node': registry.npmmirror.com/@types/node/17.0.18
   '@vue/theme': registry.npmmirror.com/@vue/theme/1.0.1
-  vitepress: registry.npmmirror.com/vitepress/0.22.2
+  vitepress: registry.npmmirror.com/vitepress/0.22.3
 
 packages:
 
@@ -817,11 +817,11 @@ packages:
       fsevents: registry.npmmirror.com/fsevents/2.3.2
     dev: true
 
-  registry.npmmirror.com/vitepress/0.22.2:
-    resolution: {integrity: sha512-L6ykQzBXKzLTSU3zZbILeF1TONO6juV/RrL0DsA9OayomVQjEOoFY7cVdKOpIBb3T5Jy/GAAVxcvWtU/XJ5k4g==, registry: https://registry.npm.taobao.org/, tarball: https://registry.npmmirror.com/vitepress/-/vitepress-0.22.2.tgz}
+  registry.npmmirror.com/vitepress/0.22.3:
+    resolution: {integrity: sha512-Yfvu/rent2vp/TXIDZMutS6ft2TJPn4xngS48PYFWDEbuFI2ccUAXM481lF1qVVnCKxfh4g8e/KPvevSJdg1Bw==, registry: https://registry.npm.taobao.org/, tarball: https://registry.npmmirror.com/vitepress/-/vitepress-0.22.3.tgz}
     name: vitepress
-    version: 0.22.2
-    engines: {node: '>=12.0.0'}
+    version: 0.22.3
+    engines: {node: '>=14.0.0'}
     hasBin: true
     dependencies:
       '@docsearch/css': registry.npmmirror.com/@docsearch/css/3.0.0-alpha.50

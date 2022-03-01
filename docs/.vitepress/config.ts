@@ -40,7 +40,8 @@ export default defineConfig({
           { text: '原始值的响应式方案', link: '/guide/reactivity/original' }
         ]
       }],
-    }
+    },
+    search: true
   },
 
 })
