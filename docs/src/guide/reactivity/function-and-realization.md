@@ -908,7 +908,7 @@ function computed(getter) {
     let dirty = true
     const effectFn = effect(getter, {
         lazy: true,
-        scheduler(fn){
+        scheduler(fn) {
             dirty = true
         }
     })
@@ -925,3 +925,192 @@ function computed(getter) {
     return obj
 }
 ```
+这样，就实现了我们想要的效果，但还存在一个缺陷，看下面代码
+```js
+const data = {
+    a: 1,
+    b: 2
+}
+const obj = proxy(data)
+    
+const count = computed(() => {
+    return obj.a + obj.b
+})
+effect(() => {
+    console.log(count.value)
+})
+obj.a = 10
+```
+上面代码我们期望的执行结果是
+```
+3
+12
+```
+但实际执行结果确实
+```
+12
+```
+很明显，当我们修改 obj.a 的值时，effect 函数并没有重新执行。
+```js
+effect(() => {
+    console.log(count.value)
+})
+```
+分析原因，上面代码相当于是一个 effect 函数嵌套。计算属性 count 拥有它自己的 effect ，并且是懒执行的，只有读取计算属性的值时才会执行。在获取 count.value 的时候，会触发 computed 内部的 effectFn，而 getter 只会收集计算属性内部的依赖收集。执行完毕后，并没有把外层的 effct 收集进来。所以当 obj.a 修改时，并不会触发外层 effect 函数的执行
+
+解决办法很简单，只需要在访问计算属性的时候，把外层的副作用函数给添加到依赖中，当修改计算属性内部的依赖（如上面的 obj.a 、 obj.b）时，触发副作用函数的执行即可
+```js
+function computed(getter) {
+    let value
+    let dirty = true
+    const effectFn = effect(getter, {
+        lazy: true,
+        scheduler(fn) {
+            dirty = true
+            // 计算属性值发生改变，触发变化，执行外层的副作用函数
+            trigger(obj, 'value')
+        }
+    })
+
+    const obj = {
+        get value() {
+            if (dirty) {
+                value = effectFn()
+                dirty = false
+            }
+            // 访问时，收集外层的副作用函数
+            track(obj, 'value')
+            return value
+        }
+    }
+    return obj
+}
+```
+它会建立这样的联系
+```
+computed
+  └── value
+       └── effectFn
+```
+## watch 的实现原理
+watch 就是监听一个响应式数据的变化，当数据发生变化时，通知并执行相应的回调
+```js
+watch(obj, () => {
+    console.log('obj 发生变化了')
+})
+obj.foo++
+```
+watch 方法本质上就是利用了 effect 以及 options.scheduler
+```js
+effect(() => {
+    console.log(obj.foo)
+}, {
+    scheduler() {
+        
+    }
+})
+```
+下面实现一个最简单的 watch 方法
+```js
+function watch(obj, cb) {
+    effect(() => obj.foo, {
+        scheduler() {
+            cb()
+        }
+    })
+}
+```
+使用上面实现的 watch 函数
+```js
+const data = {
+    foo: 1
+}
+const obj = proxy(data)
+function watch(obj, cb) {
+    effect(() => obj.foo, {
+        scheduler() {
+            cb()
+        }
+    })
+}
+watch(obj, () => {
+    console.log('obj 发生了变化')
+})
+setTimeout(() => {
+    obj.foo = 10
+}, 1000)
+```
+运行上面代码，可以正常工作，但我们在watch 时，写死了 obj.foo 的读取操作，所以，现在还无法监听到 obj 上其他属性的变化
+
+为了监听到 obj 所有属性的变化，我们需要封装一个通用的方法，读取 obj 上所有的属性，这样就能够监听到所有属性的变化了
+```js
+function traverse(value, seen = new Set()){
+    // seen.has(value)) 的作用是判断是否读取过了，避免产生死循环
+    if(typeof value !== 'object' || value === null && seen.has(value)) return
+    seen.add(value)
+    // 读取每个属性，递归调用 traverse 
+    for(const k in value){
+        traverse(value[k], seen)
+    }
+    return value
+}
+function watch(obj, cb) {
+    effect(() => traverse(obj), {
+        scheduler() {
+            cb()
+        }
+    })
+}
+```
+watch 方法除了能够观测响应式数据，还可以接收一个 getter 函数，在 getter 函数内部指定依赖项
+```js
+watch(() => obj.foo, () => {
+    console.log('obj.foo 的值发生了变化')
+})
+```
+实现代码：
+```js
+function watch(source, cb) {
+    let getter
+    // 如果是函数，说明用户传递的是 getter  有点类似我们第一次实现的 watch 方法
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    effect(getter, {
+        scheduler() {
+            cb()
+        }
+    })
+}
+```
+在 Vue 中，使用 watch 方法还可以获取到对应属性的新值和旧值
+```js
+watch(() => obj.foo, (newVal, oldVal) => {
+    console.log(newVal, oldVal)
+})
+```
+实现代码很简单
+```js
+function watch(source, cb) {
+    let getter
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    let oldVal
+    let effectFn = effect(getter, {
+        lazy: true,
+        scheduler() {
+            let newVal = effectFn()
+            cb(oldVal, newVal)
+            oldVal = newVal
+        }
+    })
+    //  第一次执行， oldVal就是副作用函数的返回值
+    oldVal = effectFn()
+}
+```
+这里个人认为加 lazy 的目的是为了让 getter 延迟执行，如果不加， effectFn 就会执行多次，不加，不会影响结果。书中的解释查看 P74
