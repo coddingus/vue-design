@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>计算属性 computed 与 lazy</title>
+    <title>Document</title>
 </head>
 
 <body>
@@ -88,22 +88,6 @@
             }
         })
     }
-
-    // function computed(){
-    //     const effectFn = effect(() =>{
-
-    //     }, {
-    //         lazy: truue
-    //     })
-    // }
-
-</script>
-<script>
-    const data = {
-        a: 1,
-        b: 2
-    }
-    const obj = proxy(data)
     function computed(getter) {
         let value
         let dirty = true
@@ -128,23 +112,57 @@
         }
         return obj
     }
-    // const effectFn = effect(() => {
-    //     return {
-    //         value: obj.a + obj.b
-    //     }
-    // }, {
-    //     lazy: true
-    // })
-
-    const count = computed(() => {
-        return obj.a + obj.b
+</script>
+<script>
+    const data = {
+        foo: 1
+    }
+    const obj = proxy(data)
+    function traverse(value, seen = new Set()) {
+        if (typeof value !== 'object' || value === null && seen.has(value)) return
+        seen.add(value)
+        for (const k in value) {
+            traverse(value[k], seen)
+        }
+        return value
+    }
+    function watch(source, cb, options) {
+        let getter
+        let oldVal
+        if (typeof source === 'function') {
+            getter = source
+        } else {
+            getter = () => traverse(source)
+        }
+        function job() {
+            let newVal = effectFn()
+            cb(oldVal, newVal)
+            oldVal = newVal
+        }
+        let effectFn = effect(getter, {
+            lazy: true,
+            scheduler() {
+                if (options.flush === 'post') {
+                    const p = Promise.then()
+                    p.then(job)
+                } else {
+                    job()
+                }
+            }
+        })
+        if (options.immediate) {
+            job()
+        } else {
+            oldVal = effectFn()
+        }
+    }
+    watch(() => obj.foo, (newVal, old) => {
+        console.log('obj.foo 的值发生了变化')
+        console.log(newVal, old)
+    }, {
+        flush: 'pre'
     })
-    console.log(count.value)
-    effect(() => {
-        console.log(count.value)
-    })  
-    obj.a = 10
-  
+    obj.foo = 10
 </script>
 
 </html>

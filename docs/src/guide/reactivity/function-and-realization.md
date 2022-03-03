@@ -992,7 +992,8 @@ computed
   └── value
        └── effectFn
 ```
-## watch 的实现原理
+## watch 
+### watch的实现原理
 watch 就是监听一个响应式数据的变化，当数据发生变化时，通知并执行相应的回调
 ```js
 watch(obj, () => {
@@ -1113,4 +1114,164 @@ function watch(source, cb) {
     oldVal = effectFn()
 }
 ```
-这里个人认为加 lazy 的目的是为了让 getter 延迟执行，如果不加， effectFn 就会执行多次，不加，不会影响结果。书中的解释查看 P74
+这里个人认为加 lazy 的目的是为了让 getter 延迟执行，如果不加，虽然不会影响结果，但是 effectFn 会执行多次
+### 立即执行的 watch 与回调执行时机
+watch 函数的两个特性
+* 立即执行的回调函数
+* 回调函数的执行时机
+
+立即执行的回调函数，默认情况下，一个回到函数只有在响应式的数据发生变化时才执行
+```js
+// 只有 obj 发生变化时才会执行回调函数
+watch(() => obj.foo, () => {
+    console.log('obj 变化了')
+})
+```
+在 Vue.js 中，可以通过选项 immediate 来指定回调函数是否需要立即执行
+```js
+watch(() => obj.foo, () => {
+    console.log('obj 变化了')
+}, {
+    immediate: true
+})
+```
+当 immediate 选项为 true 时，回调函数就会在 watch 创建时立即执行一次，跟后续执行没有区别。我们将 scheduler 调度函数封装起来， 当我们传递 immediate 选项时，直接调用它就行了。
+```js
+function watch(source, cb, options) {
+    let getter
+    let oldVal
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    function job() {
+        let newVal = effectFn()
+        cb(oldVal, newVal)
+        oldVal = newVal
+    }
+    let effectFn = effect(getter, {
+        lazy: true,
+        scheduler: job
+    })
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
+}
+```
+执行代码后，第一次执行回调的 oldValue 是 undefined 因为第一次执行没有所谓的旧值，所以这符合我们的预期
+
+Vue 中还可以指定其他选项来指定回调的执行时机，例如在 Vue 中使用 flush 选项
+```js
+watch(() => obj.foo, (newVal, old) => {
+    console.log('obj.foo 的值发生了变化')
+    console.log(newVal, old)
+}, {
+    flush: 'pre' // 还可指定为 'post' 和 'sync'
+})
+```
+flush 是用来指定调度函数的执行时机。 flush 的值为 'post' 时，代表调度函数需要将副作用函数放到一个微任务队列中
+```js
+function watch(source, cb, options) {
+    let getter
+    let oldVal
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    function job() {
+        let newVal = effectFn()
+        cb(oldVal, newVal)
+        oldVal = newVal
+    }
+    let effectFn = effect(getter, {
+        lazy: true,
+        scheduler() {
+            // flush 值为 post ，将调度函数放到异步队列中
+            if (options.flush === 'post') {
+                const p = Promise.then()
+                p.then(job)
+            } else {
+                job()
+            }
+        }
+    })
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
+}
+```
+如上面代码所示， 修改了 scheduler 的实现方式，如果指定 flush 值为 post ，将将 job 函数放到异步队列中，从而实现延迟执行；否则直接执行 job 函数， 这本质上就相当于是 sync 的实现机制（同步）。对于 flush 的值为 'pre'，因为涉及组件的更新机制，这里现在还没办法模拟
+### 过期的副作用
+在工作可能会遇到这样的场景
+```js
+watch(obj, async () => {
+    const res = await fetch('xxx')
+    finalData = res
+})
+```
+当我们修改 obj.a 的值时，会发送一次请求，再修改 obj.b  的值时，会再发送一次请求，但是我们先发送的请求可能会后接收到。例如修改obj.b 发送的请求先返回，这就导致 obj.a 会返回的数据会覆盖掉 obj.b 返回的数据
+
+在 Vue.js 中， watch 函数可以指定接收第三个参数 onInvalidate ,它是一个函数，类似于监听器，我们可以使用 onInvalidate 函数注册一个回调，这个回调函数就会在当前副作用函数过期时执行
+```js
+let finaldata
+watch(obj, async (newValue, oldValue, onInvalidate) => {
+    let expired = false
+    onInvalidate(() => {
+        expired = true
+    })
+    const res = await getData(newValue.count)
+    if (!expired) {
+        finaldata = res
+    }
+    console.log(finaldate)
+})
+```
+实现思路就是我们用户调用 onInvalidate 后，我们将 onInvalidate 的回调给保存起来，当数据再次发生的改变时，就会调用该回调函数（即执行过期回调）
+```js
+function watch(source, cb, options = {}) {
+    let getter
+    let oldVal
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    // 用来保存调用 onInvalidate 传递的回调 即过期回调
+    let cleanup
+    function onInvalidate(fn) {
+        cleanup = fn
+    }
+    function job() {
+        let newVal = effectFn()
+
+        // 调用上次传递的回调即过期回调
+        if(cleanup){
+            cleanup()
+        }
+        cb(oldVal, newVal, onInvalidate)
+        oldVal = newVal
+    }
+    let effectFn = effect(getter, {
+        lazy: true,
+        scheduler() {
+            if (options.flush === 'post') {
+                const p = Promise.then()
+                p.then(job)
+            } else {
+                job()
+            }
+        }
+    })
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
+}
+```

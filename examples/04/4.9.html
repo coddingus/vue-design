@@ -136,9 +136,9 @@
         }
         let oldVal
         let effectFn = effect(getter, {
-            // lazy: true,
+            lazy: true,
             scheduler() {
-                let newVal =  effectFn()
+                let newVal = effectFn()
                 cb(oldVal, newVal)
                 oldVal = newVal
             }
@@ -156,7 +156,6 @@
         console.log(newVal, old)
     })
     obj.foo = 10
-
 </script>
 
 </html>

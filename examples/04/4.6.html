@@ -62,7 +62,7 @@
                 effectsToRun.add(effectFn)
             }
         })
-        effectsToRun.forEach(fn => fn())
+        effectsToRun.forEach(effectFn => effectFn())
     }
     function proxy(data) {
         return new Proxy(data, {
