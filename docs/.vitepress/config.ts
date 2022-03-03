@@ -24,14 +24,21 @@ export default defineConfig({
       { text: 'Github', link: 'https://github.com/coddingus/vue-design' },
     ],
     sidebar: {
-      '/design/': [{
+      '/guide/': [{
         text: '框架设计概览',
         children: [
-          { text: '权衡的艺术', link: '/design/art' },
-          { text: '框架设计的核心要素', link: '/design/elements' },
-          { text: 'Vue.js 3 的设计思路', link: '/design/thinking' }
+          { text: '权衡的艺术', link: '/guide/design/art' },
+          { text: '框架设计的核心要素', link: '/guide/design/elements' },
+          { text: 'Vue.js 3 的设计思路', link: '/guide/design/thinking' }
         ]
-      }]
+      },{
+        text: '响应系统',
+        children: [
+          { text: '响应系统的作用与实现', link: '/guide/reactivity/function-and-realization' },
+          { text: '非原始值的响应式方案', link: '/guide/reactivity/non-original' },
+          { text: '原始值的响应式方案', link: '/guide/reactivity/original' }
+        ]
+      }],
     }
   },
 
