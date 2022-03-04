@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>非原始值的响应式方案</title>
+</head>
+
+<body>
+
+</body>
+<script>
+    let activeEffect
+    const effectStack = []
+    function effect(fn, options = {}) {
+        function effectFn() {
+            cleanup(effectFn)
+            activeEffect = effectFn
+            effectStack.push(effectFn)
+            const res = fn()
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length - 1]
+            return res
+        }
+        effectFn.options = options
+        effectFn.deps = []
+        if (!options.lazy) {
+            effectFn()
+        }
+        return effectFn
+    }
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        // 重置数组
+        effectFn.deps.length = 0
+    }
+
+    const bucket = new WeakMap()
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+        if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()))
+        }
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+        // 把当前激活的副作用函数添加到依赖集合 deps 中
+        deps.add(activeEffect)
+        // 将当前的依赖集合添加到 deps数组中
+        activeEffect.deps.push(deps)
+    }
+    function trigger(target, key) {
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        const deps = depsMap.get(key)
+        const effectsToRun = new Set()
+        deps && deps.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+        effectsToRun.forEach(effectFn => {
+            if (effectFn.options.scheduler) {
+                effectFn.options.scheduler(effectFn)
+            } else {
+                effectFn()
+            }
+        })
+    }
+    function proxy(data) {
+        return new Proxy(data, {
+            get(target, key, receiver) {
+                track(target, key)
+                return Reflect.get(target, key, receiver)
+            },
+            set(target, key, newVal) {
+                target[key] = newVal
+                trigger(target, key)
+                return true
+            }
+        })
+    }
+    function computed(getter) {
+        let value
+        let dirty = true
+        const effectFn = effect(getter, {
+            lazy: true,
+            scheduler(fn) {
+                dirty = true
+                trigger(obj, 'value')
+            }
+        })
+
+        const obj = {
+            get value() {
+                if (dirty) {
+                    value = effectFn()
+                    dirty = false
+                }
+                track(obj, 'value')
+                console.log(activeEffect)
+                return value
+            }
+        }
+        return obj
+    }
+    function traverse(value, seen = new Set()) {
+        if (typeof value !== 'object' || value === null && seen.has(value)) return
+        seen.add(value)
+        for (const k in value) {
+            traverse(value[k], seen)
+        }
+        return value
+    }
+    function watch(source, cb, options = {}) {
+        let getter
+        let oldVal
+        if (typeof source === 'function') {
+            getter = source
+        } else {
+            getter = () => traverse(source)
+        }
+        let cleanup
+        function onInvalidate(fn) {
+            cleanup = fn
+        }
+        function job() {
+            let newVal = effectFn()
+
+            if (cleanup) {
+                cleanup()
+            }
+            cb(oldVal, newVal, onInvalidate)
+            oldVal = newVal
+        }
+        let effectFn = effect(getter, {
+            lazy: true,
+            scheduler() {
+                if (options.flush === 'post') {
+                    const p = Promise.then()
+                    p.then(job)
+                } else {
+                    job()
+                }
+            }
+        })
+        if (options.immediate) {
+            job()
+        } else {
+            oldVal = effectFn()
+        }
+    }
+</script>
+<script>
+    // const obj = {
+    //     foo: 1
+    // }
+    // const p = new Proxy(obj, {
+    //     /*拦截读取属性*/
+    //     get() {
+    //     },
+    //     /*拦截设置属性*/
+    //     set() {
+    //     }
+    // })
+    // function fn(name) {
+    //     console.log('我是：', name)
+    // }
+    // const p2 = new Proxy(fn, {
+    //     apply(target, thisArg, argArray) {
+    //         console.log('拦截了')
+    //         target.call(thisArg, ...argArray)
+    //     }
+    // })
+    // p2('shibin') //输出 我是：shibin
+
+    // 直接读取
+    // console.log(obj.foo) // 1
+    // 使用 Reflect.get 获取
+    // console.log(Reflect.get(obj, 'foo'))  // 1
+    // const obj = {
+    //     get foo() {
+    //         return this.foo
+    //     }
+    // }
+    // console.log(Reflect.get(obj, 'foo', { foo: 2 }))  // 2
+
+
+const obj = {
+    foo: 1,
+    get bar(){
+        console.log(this)
+        return this.foo
+    }
+}
+const p = proxy(obj)
+effect(() => {
+    console.log(p.bar) // 1
+})
+setTimeout(() => {
+    p.foo++
+}, 1000)
+</script>
+
+</html>

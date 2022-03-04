@@ -54,7 +54,6 @@
         if (!depsMap) return
         const deps = depsMap.get(key)
         const effectsToRun = new Set(deps)
-
         effectsToRun && effectsToRun.forEach(fn => fn())
     }
     function proxy(data) {
