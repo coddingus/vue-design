@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>非原始值的响应式方案</title>
+</head>
+
+<body>
+
+</body>
+<script>
+    const TriggerType = {
+        SET: 'SET',
+        ADD: 'ADD',
+        DEL: 'DEL'
+    }
+    let activeEffect
+    const effectStack = []
+    function effect(fn, options = {}) {
+        function effectFn() {
+            cleanup(effectFn)
+            activeEffect = effectFn
+            effectStack.push(effectFn)
+            const res = fn()
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length - 1]
+            return res
+        }
+        effectFn.options = options
+        effectFn.deps = []
+        if (!options.lazy) {
+            effectFn()
+        }
+        return effectFn
+    }
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        // 重置数组
+        effectFn.deps.length = 0
+    }
+
+    const bucket = new WeakMap()
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+        if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()))
+        }
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+        // 把当前激活的副作用函数添加到依赖集合 deps 中
+        deps.add(activeEffect)
+        // 将当前的依赖集合添加到 deps数组中
+        activeEffect.deps.push(deps)
+    }
+    function trigger(target, key, type) {
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        // 取得所有与 key 关联的副作用函数
+        const deps = depsMap.get(key)
+        // 取得所有与 ITERATE_KEY 关联的副作用函数
+        const iterateEffects = depsMap.get(ITERATE_KEY)
+
+        const effectsToRun = new Set()
+        deps && deps.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+        if (type === TriggerType.ADD || type === TriggerType.DEL) {
+            iterateEffects.forEach(effectFn => {
+                if (activeEffect !== effectFn) {
+                    effectsToRun.add(effectFn)
+                }
+            })
+        }
+
+        effectsToRun.forEach(effectFn => {
+            if (effectFn.options.scheduler) {
+                effectFn.options.scheduler(effectFn)
+            } else {
+                effectFn()
+            }
+        })
+    }
+    const ITERATE_KEY = Symbol()
+    function proxy(data) {
+        return new Proxy(data, {
+            get(target, key, receiver) {
+                track(target, key)
+                return Reflect.get(target, key, receiver)
+            },
+            set(target, key, newVal, receiver) {
+                const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+                const res = Reflect.set(target, key, newVal, receiver)
+                trigger(target, key, type)
+                return res
+            },
+            has(target, key) {
+                track(target, key)
+                return Reflect.has(target, key)
+            },
+            ownKeys(target, key) {
+                track(target, ITERATE_KEY)
+                return Reflect.ownKeys(target)
+            },
+            deleteProperty(target, key) {
+                const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+                const res = Reflect.deleteProperty(target, key)
+                // 只有删除成功且删除的属性是自己的属性时才触发更新
+                if (res && hadKey) {
+                    trigger(target, key, TriggerType.DEL)
+                }
+            }
+        })
+    }
+    function computed(getter) {
+        let value
+        let dirty = true
+        const effectFn = effect(getter, {
+            lazy: true,
+            scheduler(fn) {
+                dirty = true
+                trigger(obj, 'value')
+            }
+        })
+
+        const obj = {
+            get value() {
+                if (dirty) {
+                    value = effectFn()
+                    dirty = false
+                }
+                track(obj, 'value')
+                console.log(activeEffect)
+                return value
+            }
+        }
+        return obj
+    }
+    function traverse(value, seen = new Set()) {
+        if (typeof value !== 'object' || value === null && seen.has(value)) return
+        seen.add(value)
+        for (const k in value) {
+            traverse(value[k], seen)
+        }
+        return value
+    }
+    function watch(source, cb, options = {}) {
+        let getter
+        let oldVal
+        if (typeof source === 'function') {
+            getter = source
+        } else {
+            getter = () => traverse(source)
+        }
+        let cleanup
+        function onInvalidate(fn) {
+            cleanup = fn
+        }
+        function job() {
+            let newVal = effectFn()
+
+            if (cleanup) {
+                cleanup()
+            }
+            cb(oldVal, newVal, onInvalidate)
+            oldVal = newVal
+        }
+        let effectFn = effect(getter, {
+            lazy: true,
+            scheduler() {
+                if (options.flush === 'post') {
+                    const p = Promise.then()
+                    p.then(job)
+                } else {
+                    job()
+                }
+            }
+        })
+        if (options.immediate) {
+            job()
+        } else {
+            oldVal = effectFn()
+        }
+    }
+</script>
+<script>
+    const obj = {
+        foo: 1
+    }
+    const p = proxy(obj)
+    effect(() => {
+        for (const k in p) {
+            console.log(k)
+        }
+    })
+    p.bar = 'bar'
+    setTimeout(() => {
+        // p.foo++
+        // p.bar = 'bar1'
+        delete p.foo
+    }, 2000)
+</script>
+
+</html>

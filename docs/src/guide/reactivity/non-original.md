@@ -68,7 +68,7 @@ console.log(Reflect.get(obj, 'foo', { foo: 2 }))  // 2
 ```
 看下我们之前实现的代码
 ```js
-function proxy(data) {
+function reactive(data) {
     return new Proxy(data, {
         get(target, key) {
             track(target, key)
@@ -90,7 +90,7 @@ const obj = {
         return this.foo
     }
 }
-const p = proxy(obj)
+const p = reactive(obj)
 effect(() => {
     console.log(p.bar) // 1
 })
@@ -104,7 +104,7 @@ obj.foo++
 
 我们在 get 函数中，通过 target[key] ，此时的 target 就是 obj ，target[key] 就相当于是 obj.bar ，最终访问的是 obj.foo
 ```js
-function proxy(data) {
+function reactive(data) {
     return new Proxy(data, {
         get(target, key) {
             track(target, key)
@@ -130,16 +130,16 @@ effect(() => {
 
 这时候， Reflect.get 就派上用场了， Reflect.get 的第三个参数，它代表读取谁的属性
 ```js
-function proxy(data) {
+function reactive(data) {
     return new Proxy(data, {
         get(target, key, receiver) {
             track(target, key)
             return Reflect.get(target, key, receiver)
         },
         set(target, key, newVal) {
-            target[key] = newVal
+            const res = Reflect.set(target, key, newVal, receiver)
             trigger(target, key)
-            return true
+            return res
         }
     })
 }
@@ -166,3 +166,511 @@ obj.foo
 如果一个对象作为函数调用，那么这个对象内部必须部署内部方法 [[Call]]
 
 代理对象和普通对象没有太大区别，区别在于内部方法 [[Get]] 的实现。如果在创建代理对象时，没有指定对应的拦截函数，内部 [[Get]] 方法就会调用原始对象来获取属性值
+
+Proxy 对象部署的所有内部方法
+|内部方法| 处理器函数（拦截函数）
+|-|-|
+| [[GetPrototypeOf]] | getPrototypeOf |
+| [[SetPrototypeOf]] | setPrototypeOf |
+| [[IsExtensible]] | isExtensible |
+| [[PreventExtensions]] | preventExtensions |
+| [[GetOwnProperty]] | getOwnPropertyDescriptor |
+| [[DefineOwnProperty]] | defineProperty |
+| [[HasProperty]] | has |
+| [[Get]] | get |
+| [[Set]] | set |
+| [[Delete]] | deleteProperty |
+| [[OwnPropertyKeys]] | ownKeys |
+| [[Call]] | apply |
+| [[Construct]] | construct |
+
+其中，[[Call]] 和 [[Construct]] 这两个内部方法，只有当被代理的对象是函数和构造函数时才会部署。
+
+由上面的表中，我们可以知道拦截删除属性操作时，可以使用 deleteProperty 拦截函数实现
+```js
+const p = new Proxy(obj, {
+    deleteProperty(target, key) {
+        return Reflect.deleteProperty(target, key)
+    }
+})
+```
+## 如何代理 Object
+前面我们使用在 get 拦截函数去拦截对属性读取的操作。在响应式系统中，读取是一个很宽泛的改了，例如使用 in 操作检查对象上是否具有给定 key 也属于读取操作
+```js
+effect(() => {
+    'foo' in obj
+})
+```
+响应系统应该拦截一切读取操作，以便当数据发生变化能触发正确的响应。对一个对象的所有可能的读取操作有下面几种
+* 访问属性 obj.foo
+* 判断对象或原型上是否存在给定的 key： key in obj
+* 使用 for...in 循环遍历对象：for(const key in obj) {}
+
+### in 操作符拦截
+对于 in 操作符，并没有在表中找到相关操作的内容，怎么办呢？这时，就需要我们查看 in 操作符的相关规范
+
+在 [ECMA-262](https://tc39.es/ecma262/) 规范的 [13.10.1](https://tc39.es/ecma262/#sec-relational-operators-runtime-semantics-evaluation)，明确定义了 in 操作符的运行逻辑
+1. Let lref be the result of evaluating RelationalExpression.
+2. Let lval be ? GetValue(lref).
+3. Let rref be the result of evaluating ShiftExpression.
+4. Let rval be ? GetValue(rref).
+5. If Type(rval) is not Object, throw a TypeError exception.
+6. Return ? HasProperty(rval, ? ToPropertyKey(lval)).
+
+关键在第 6 步，in 操作符的运算结果是 HasProperty 对象返回的，我们在找到 [HasProperty](https://tc39.es/ecma262/#sec-hasproperty) 的操作
+1. Return ? O.[[HasProperty]](P)
+
+可以看到 HasProperty 的结果是调用内部的 [[HasProperty]] 方法得到的，[[HasProperty]] 对应的拦截方法是 has
+
+因此，我们可以通过 has 拦截函数实现对 in 操作符的代理
+```js
+const p = new Proxy(obj, {
+    has(target, obj) {
+        track(target, key)
+        return Reflect.has(target, key)
+    }
+})
+```
+当我们在副作用函数中使用 in 操作响应数据时，就能建立依赖关系
+```js
+effect(() => {
+    'foo' in p
+})
+```
+### for...in 拦截
+[关于 for...in 执行规范](https://tc39.es/ecma262/#sec-runtime-semantics-forinofheadevaluation)
+
+在第 6 步的 c 子步骤
+
+c. Let iterator be EnumerateObjectProperties(obj).
+
+关键点在 EnumerateObjectProperties(obj)。 EnumerateObjectProperties 是一个抽象方法，该方法返回一个迭代器对象，在 [14.7.9](https://tc39.es/ecma262/#sec-enumerate-object-properties) 给出了满足该抽象方法实例的实现
+
+```js {3}
+function* EnumerateObjectProperties(obj) {
+  const visited = new Set();
+  for (const key of Reflect.ownKeys(obj)) {
+    if (typeof key === "symbol") continue;
+    const desc = Reflect.getOwnPropertyDescriptor(obj, key);
+    if (desc) {
+      visited.add(key);
+      if (desc.enumerable) yield key;
+    }
+  }
+  const proto = Reflect.getPrototypeOf(obj);
+  if (proto === null) return;
+  for (const protoKey of EnumerateObjectProperties(proto)) {
+    if (!visited.has(protoKey)) yield protoKey;
+  }
+}
+```
+第三行使用了 Reflect.ownKeys 来获取只属于对象自身拥有的键。通过这个，我们就知道可以使用 ownKeys 拦截函数来拦截 Reflect.ownKeys 操作
+```js
+const ITERATE_KEY = Symbol()
+function reactive(data) {
+    return new Proxy(data, {
+        ownKeys(target) {
+            track(target, ITERATE_KEY)
+            return Reflect.ownKeys(target)
+        }
+    })
+}
+```
+上面代码中，为什么要使用 ITERATE_KEY 作为追踪的 key？
+* 因为 ownKeys 拦截函数中，我们只能拿到目标对象 target
+* ownKeys 用来获取所有属于自己的属性，所以这个操作明显不予任何键进行绑定，只能构造一个唯一的 key 作为标识。
+  
+那么在触发响应的时候也应该触发，那在什么时候触发响应呢？先看下面代码
+```js
+const obj = {
+    foo: 1
+}
+const p = reactive(obj)
+effect(() => {
+    for(const k in p){
+        console.log(k)
+    }
+})
+p.bar = 'bar'
+```
+对象 p 上本来不存在 bar 属性，effect 内部的副作用函数 for...in 会循环一次，当给对象添加属性 bar 时，需要触发副作用函数重新执行才可以
+```js {7,15-20}
+function trigger(target, key) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    // 取得所有与 key 关联的副作用函数
+    const deps = depsMap.get(key)
+    // 取得所有与 ITERATE_KEY 关联的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+    const effectsToRun = new Set()
+    deps && deps.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    // ITERATE_KEY 关联的副作用函数 添加到 effectsToRun 中
+    iterateEffects && iterateEffects.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+
+    effectsToRun.forEach(effectFn => {
+        if (effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn)
+        } else {
+            effectFn()
+        }
+    })
+}
+```
+这么做还会有一个问题，当我们设置属性时，也会触发 ITERATE_KEY 关联的副作用函数执行
+```js
+const obj = {
+    foo: 1
+}
+const p = reactive(obj)
+effect(() => {
+    for(const k in p){
+        console.log(k)
+    }
+})
+p.foo++
+```
+按理说，设置属性不会对for...in 循环产生影响，不应该更新，因为无论怎么修改，for...in 循环执行都只会执行一次
+
+为了解决上面的问题，我们可以在设置属性时，在 set 拦截函数中先判断对象是否存在这个属性
+```js
+function reactive(data) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            // 属性存在，就是设置
+            // 不存在就是添加
+            const type = Object.prototype.hasOwnProperty.call(target, key)? 'SET': 'ADD'
+            const res = Reflect.set(target, key, newVal, receiver)
+            trigger(target, key, type)
+            return res
+        }
+    })
+}
+```
+上面代码中我们判断对象是否需存在这个属性，存在就是 SET 类型，不存在就是 ADD 类型
+
+在 trigger 函数内部， 根据类型 决定是否需要触发 ITERATE_KEY 关联的副作用函数
+```js
+function trigger(target, key, type) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const deps = depsMap.get(key)
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+    const effectsToRun = new Set()
+    deps && deps.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    // 只有 type 为 ADD 时，才触发与 ITERATE_KEY 关联的副作用函数
+    type === 'ADD' && iterateEffects && iterateEffects.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    effectsToRun.forEach(effectFn => {
+        if (effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn)
+        } else {
+            effectFn()
+        }
+    })
+}
+```
+为了方便后期代码维护，需要将操作类型封装为一个枚举值
+```js
+const TriggerType = {
+    SET: 'SET',
+    ADD: 'ADD'
+}
+```
+### delete 拦截
+```js
+delete p.foo
+```
+如何代理 delete 操作符，需要查看 [delete 规范](https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation) 。
+
+第 5 步的内容如下
+```
+5. If IsPropertyReference(ref) is true, then
+  a. Assert: IsPrivateReference(ref) is false.
+  b. If IsSuperReference(ref) is true, throw a ReferenceError exception.
+  c. Let baseObj be ? ToObject(ref.[[Base]]).
+  d. Let deleteStatus be ? baseObj.[[Delete]](ref.[[ReferencedName]]).
+  e. If deleteStatus is false and ref.[[Strict]] is true, throw a TypeError exception.
+  f. Return deleteStatus.
+```
+
+在第 5 步的 d 子步骤可知， delete 操作的行为依赖 [[Delete]] 内部方法，该内部方法对应的拦截函数为 deleteProperty
+
+所以可以使用 deleteProperty 对删除属性进行拦截
+```js
+const TriggerType = {
+    SET: 'SET',
+    ADD: 'ADD',
+    DEL: 'DEL'
+}
+function reactive(data) {
+    return new Proxy(data, {
+        deleteProperty(target, key) {
+            const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+            const res = Reflect.deleteProperty(target, key)
+            // 只有删除成功且删除的属性是自己的属性时才触发更新
+            if (res && hadKey) {
+                trigger(target, key, TriggerType.DEL)
+            }
+        }
+    })
+}
+```
+
+```js
+function trigger(target, key, type) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    // 取得所有与 key 关联的副作用函数
+    const deps = depsMap.get(key)
+    // 取得所有与 ITERATE_KEY 关联的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+
+    const effectsToRun = new Set()
+    deps && deps.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+
+    // 删除和添加属性时，需要触发 ITERATE_KEY 相关的副作用函数
+    if (type === TriggerType.ADD || type === TriggerType.DEL) {
+        iterateEffects && iterateEffects.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+    }
+
+    effectsToRun.forEach(effectFn => {
+        if (effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn)
+        } else {
+            effectFn()
+        }
+    })
+}
+```
+## 合理的触发响应
+### 新旧值处理
+```js
+const obj = {
+    foo: 1
+}
+const p = reactive(obj)
+effect(() => {
+    console.log(p.foo)
+})
+setTimeout(() => {
+    p.foo = 1
+}, 1000)
+```
+上面代码中，p.foo 的值并没有发生变化，但是还是会再次触发副作用函数的执行。因此，当我们在调用 trigger 函数时，还需要判断新旧两个值是否相等
+```js
+function reactive(data) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            const oldVal = target[key]
+            const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+            const res = Reflect.set(target, key, newVal, receiver)
+            if (oldVal !== newVal) {
+                trigger(target, key, type)
+            }
+            return res
+        }
+    })
+}
+```
+但是，上面代码存在缺陷，当原来的值时 NaN 时，我们再次设置的值还是 NaN ，使用全等比较总是为返回 false
+```js
+NaN === NaN // false
+NaN !== NaN // true
+```
+为了解决这个问题，我们需要在判断上加一个条件
+```js
+// 当新旧值不相等且 新值和旧值不都是 NaN 的时候才触发更新
+if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+    trigger(target, key, type)
+}
+```
+### 原型继承处理
+```js
+const obj = {}
+const proto = {
+    bar: 1
+}
+const child = reactive(obj)
+const parent = reactive(proto)
+// 使用 parent 作为 child 的原型
+Object.setPrototypeOf(child, parent)
+effect(() => {
+    console.log(child.bar)
+})
+// 修改 child.bar 的值，副作用函数会重新执行
+child.bar = 2
+```
+执行上面代码，当我们修改 child.bar 的值时，我们发现副作用函数执行了两次
+
+分析原因
+* 当我们访问 child.bar 时，会将副作用函数添加到依赖中（child.bar）
+* 由于 child 并不存在 bar 属性，所以会从原型上获取
+* 访问原型的属性时，由于 parent 也是响应式的，所以会再次被添加到依赖中（parent.bar）
+* 当设置 child.bar 的值时，会触发 child 的 set 拦截函数，使用 Reflect.set 会调用 obj对象上内部的 [[set]] 方法
+* 如果设置的属性在对象上不存在，就会取得原型并调用原型的 set 方法，这就会导致，虽然我们设置的是 child.bar ，但还是会执行 parent.bar 的拦截函数被执行
+
+解决的办法就是屏蔽 parent.bar 触发的副作用函数给屏蔽就可以了。两次更新是由于 parent.bar 触发的副作用函数
+
+child 的 set 拦截函数
+```js
+set(target, key, newVal, receiver) {
+    // target 是原始对象 obj
+    // receiver 是代理对象 child
+}
+```
+parent 的 set 拦截函数
+```js
+set(target, key, newVal, receiver) {
+    // target 是原始对象 proto
+    // receiver 仍是代理对象 child
+}
+```
+我们发现，两次 set 拦截函数中，target 是变化的，reveiver 都是 child ，根据这个区别，我们只需要判断receiver 是不是 target 的代理对象就可以了
+
+首先我们需要给 get 拦截函数添加一个能力
+```js
+function reactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if(key === 'raw'){
+                return target
+            }
+            track(target, key)
+            return Reflect.get(target, key, receiver)
+        }
+    })
+}
+```
+这时，代理对象就可以通过访问 raw 属性访问原始的数据对象
+```js
+child.raw === obj // true
+parent.raw === proto // true
+```
+我们就可以在 set 拦截函数中判断 receiver 是不是 target 的代理对象了
+```js
+function reactive(data) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            const oldVal = target[key]
+            const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+            // 由于 key 不存在，所以会调用这里会触发原型上（parent）的 set 拦截
+            const res = Reflect.set(target, key, newVal, receiver)
+            // receiver 是 target 的代理对象
+            if (target === receiver.raw) {
+                if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+                    trigger(target, key, type)
+                }
+            }
+            return res
+        }
+    })
+}
+```
+## 浅响应与深响应
+### 深响应
+在之前，我们实现的响应式都是浅响应的，例如下面代码
+```js
+const p = reactive({
+    foo: {
+        bar: 1
+    }
+})
+effect(() => {
+    console.log(p.foo.bar)
+})
+setTimeout(() => {
+    // 修改 bar 的值，并不能触发响应
+    p.foo.bar++
+}, 1000)
+```
+修改 p.foo.bar 的值，并不能触发响应，什么原因呢？
+```js
+function reactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if (key === 'raw') {
+                return target
+            }
+            track(target, key)
+            return Reflect.get(target, key, receiver)
+        }
+    })
+}
+```
+从上面代码，我们可以看到，当访问 p.foo.bar 时，首先要读取 p.foo，这里我们直接返回了 Reflect.get 得到的 p.foo 这个结果，由于这个结果是一个普通对象（{bar: 1}），所以它并不是一个响应式的。要解决这个问题，我们需要对 Reflect 做一个包装
+```js
+ function reactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if (key === 'raw') {
+                return target
+            }
+            track(target, key)
+            // 得到原始值结果
+            const res = Reflect.get(target, key, receiver)
+            if (typeof res === 'object' && res !== null) {
+                // 将结果包装成响应式的返回
+                return reactive(res)
+            }
+            return res
+        }
+    })
+ }
+```
+### 浅响应
+有的时候我们希望我们的数据时浅响应的（shallowReactive），就是只有第一层属性是响应的，这时我们只需要在我们原来的代码中稍加修改就可以了
+```js
+ function createReactive(data, isShallow = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if (key === 'raw') {
+                return target
+            }
+            track(target, key)
+            // 得到原始值结果
+            const res = Reflect.get(target, key, receiver)
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                // 将结果包装成响应式的返回
+                return reactive(res)
+            }
+            return res
+        }
+    })
+ }
+//  浅响应
+function shawReactive(data) {
+    return createReactive(data, true)
+}
+// 深响应
+function reactive(data) {
+    return createReactive(data)
+}
+```
