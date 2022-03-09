@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>只读和浅只读</title>
 </head>
 
 <body>
@@ -93,23 +93,30 @@
         })
     }
     const ITERATE_KEY = Symbol()
-    function reactive(data, isShallow = false) {
+    function reactive(data, isShallow = false, isReadonly = false) {
         return new Proxy(data, {
             get(target, key, receiver) {
                 // 代理对象可以通过 raw 属性访问原始数据
                 if (key === 'raw') {
                     return target
                 }
-                track(target, key)
+                // 非只读才需要建立响应联系
+                if (!isReadonly) {
+                    track(target, key)
+                }
+
                 const res = Reflect.get(target, key, receiver)
                 if (isShallow) return res
                 if (typeof res === 'object' && res !== null) {
-                    return reactive(res)
+                    return isReadonly ? readonly(res) : reactive(res)
                 }
                 return res
             },
             set(target, key, newVal, receiver) {
-
+                if (isReadonly) {
+                    console.warn(`属性 ${key} 是只读的`)
+                    return
+                }
                 const oldVal = target[key]
                 const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
                 const res = Reflect.set(target, key, newVal, receiver)
@@ -130,6 +137,10 @@
                 return Reflect.ownKeys(target)
             },
             deleteProperty(target, key) {
+                if (isReadonly) {
+                    console.warn(`属性 ${key} 是只读的`)
+                    return
+                }
                 const hadKey = Object.prototype.hasOwnProperty.call(target, key)
                 const res = Reflect.deleteProperty(target, key)
                 // 只有删除成功且删除的属性是自己的属性时才触发更新
@@ -141,6 +152,12 @@
     }
     function shallowReactive(data) {
         return reactive(data, true)
+    }
+    function readonly(data) {
+        return reactive(data, false, true)
+    }
+    function shallowReadonly(data) {
+        return reactive(data, true, true)
     }
     function computed(getter) {
         let value
@@ -213,18 +230,16 @@
     }
 </script>
 <script>
-    const p = reactive({
-        foo: {
-            bar: 1
+    const obj = shallowReadonly({
+        foo: 1,
+        bar: {
+            a: 2
         }
     })
     effect(() => {
-        console.log(p.foo.bar)
+        console.log(obj.bar.a) //不需要建立响应联系
     })
-    setTimeout(() => {
-        // 修改 bar 的值，并不能触发响应
-        p.foo.bar++
-    }, 1000)
+    obj.bar.a = 100
 </script>
 
 </html>

@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>代理数组</title>
 </head>
 
 <body>
@@ -62,7 +62,7 @@
         // 将当前的依赖集合添加到 deps数组中
         activeEffect.deps.push(deps)
     }
-    function trigger(target, key, type) {
+    function trigger(target, key, type, newVal) {
         const depsMap = bucket.get(target)
         if (!depsMap) return
         // 取得所有与 key 关联的副作用函数
@@ -76,6 +76,32 @@
                 effectsToRun.add(effectFn)
             }
         })
+        //  是数组时，
+        if (Array.isArray(target)) {
+            // 操作类型是 ADD  应执行所有与 length 相关的副作用函数
+            if (type === TriggerType.ADD) {
+                const lengthEffects = depsMap.get('length')
+                lengthEffects && lengthEffects.forEach(effectFn => {
+                    if (activeEffect !== effectFn) {
+                        effectsToRun.add(effectFn)
+                    }
+                })
+            }
+            // 修改数组的长度
+            if (key === 'length') {
+                depsMap.forEach((effects, key) => {
+                    // 当前索引 >= 新设置的数组的长度时，需要执行副作用函数
+                    if (key >= newVal) {
+                        effects.forEach(effectFn => {
+                            if (activeEffect !== effectFn) {
+                                effectsToRun.add(effectFn)
+                            }
+                        })
+                    }
+                })
+            }
+
+        }
         if (type === TriggerType.ADD || type === TriggerType.DEL) {
             iterateEffects && iterateEffects.forEach(effectFn => {
                 if (activeEffect !== effectFn) {
@@ -93,30 +119,45 @@
         })
     }
     const ITERATE_KEY = Symbol()
-    function reactive(data, isShallow = false) {
+    function reactive(data, isShallow = false, isReadonly = false) {
         return new Proxy(data, {
             get(target, key, receiver) {
                 // 代理对象可以通过 raw 属性访问原始数据
                 if (key === 'raw') {
                     return target
                 }
-                track(target, key)
+                // key 是 symbol 则不追踪
+                if (!isReadonly && typeof key !== 'symbol') {
+                    track(target, key)
+                }
+
                 const res = Reflect.get(target, key, receiver)
                 if (isShallow) return res
                 if (typeof res === 'object' && res !== null) {
-                    return reactive(res)
+                    return isReadonly ? readonly(res) : reactive(res)
                 }
                 return res
             },
             set(target, key, newVal, receiver) {
-
+                if (isReadonly) {
+                    console.warn(`属性 ${key} 是只读的`)
+                    return
+                }
                 const oldVal = target[key]
-                const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+
+                const type = Array.isArray(target)
+                    // 数组对象 设置的索引值 < 数组的长度，就是 SET 否则是 ADD
+                    ? Number(key) < target.length
+                        ? TriggerType.SET : TriggerType.ADD
+                    // 普通对象
+                    : Object.prototype.hasOwnProperty.call(target, key)
+                        ? TriggerType.SET : TriggerType.ADD
+
                 const res = Reflect.set(target, key, newVal, receiver)
                 // receiver 是 target 的代理对象
                 if (target === receiver.raw) {
                     if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
-                        trigger(target, key, type)
+                        trigger(target, key, type, newVal)
                     }
                 }
                 return res
@@ -126,10 +167,14 @@
                 return Reflect.has(target, key)
             },
             ownKeys(target, key) {
-                track(target, ITERATE_KEY)
+                Array.isArray(target) ? track(target, 'length') : track(target, ITERATE_KEY)
                 return Reflect.ownKeys(target)
             },
             deleteProperty(target, key) {
+                if (isReadonly) {
+                    console.warn(`属性 ${key} 是只读的`)
+                    return
+                }
                 const hadKey = Object.prototype.hasOwnProperty.call(target, key)
                 const res = Reflect.deleteProperty(target, key)
                 // 只有删除成功且删除的属性是自己的属性时才触发更新
@@ -141,6 +186,12 @@
     }
     function shallowReactive(data) {
         return reactive(data, true)
+    }
+    function readonly(data) {
+        return reactive(data, false, true)
+    }
+    function shallowReadonly(data) {
+        return reactive(data, true, true)
     }
     function computed(getter) {
         let value
@@ -213,18 +264,76 @@
     }
 </script>
 <script>
-    const p = reactive({
-        foo: {
-            bar: 1
+    const obj = {
+        val: 0,
+        [Symbol.iterator]() {
+            return {
+                next() {
+                    return {
+                        value: obj.val++,
+                        done: obj.val > 10 ? true : false
+                    }
+                }
+            }
+        }
+    }
+    for (const value of obj) {
+        console.log(value) // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+    }
+
+    const arr = [1, 2, 3, 4, 5]
+    // const itr = arr[Symbol.iterator]()
+    // console.log(itr.next()) // {value: 1, done: false}
+    // console.log(itr.next()) // {value: 2, done: false}
+    // console.log(itr.next()) // {value: 3, done: false}
+    // console.log(itr.next()) // {value: 4, done: false}
+    // console.log(itr.next()) // {value: 5, done: false}
+    // console.log(itr.next()) // {value: undefined, done: true}
+
+    // for (let val of arr) {
+    //     console.log(val) // 1, 2, 3, 4, 5
+    // }
+
+    arr[Symbol.iterator] = function () {
+        const target = this
+        const len = target.length
+        let index = 0
+        return {
+            next() {
+                return {
+                    value: index < len ? target[index] : undefined,
+                    done: index++ > len
+                }
+            }
+        }
+    }
+    const itr = arr[Symbol.iterator]()
+
+    console.log(itr.next()) // {value: 1, done: false}
+    console.log(itr.next()) // {value: 2, done: false}
+    console.log(itr.next()) // {value: 3, done: false}
+    console.log(itr.next()) // {value: 4, done: false}
+    console.log(itr.next()) // {value: 5, done: false}
+    console.log(itr.next()) // {value: undefined, done: true}
+    console.log('______________________________')
+    const p = reactive([1, 2, 3, 4, 5])
+    effect(() => {
+        for (const val of p) {
+            console.log(val)
         }
     })
+    p[1] = 22
+    console.log('______________________________')
+    console.log(Array.prototype.values === Array.prototype[Symbol.iterator]) // true
+    console.log('______________________________')
+
+    const p1 = reactive([1, 2, 3, 4, 5])
     effect(() => {
-        console.log(p.foo.bar)
+        for (const val of p1.values()) {
+            console.log(val)
+        }
     })
-    setTimeout(() => {
-        // 修改 bar 的值，并不能触发响应
-        p.foo.bar++
-    }, 1000)
+    p1[1] = 22
 </script>
 
 </html>

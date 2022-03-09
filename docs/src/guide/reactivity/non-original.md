@@ -161,30 +161,32 @@ function reactive(data) {
 ```js
 obj.foo
 ```
-引擎内部会调用 [[Get]] 这个内部方法来读取属性值。在 ECMAScript 规范中使用 [[xxx]] 来代表内部方法或内部槽
+引擎内部会调用 `[[Get]]` 这个内部方法来读取属性值。在 ECMAScript 规范中使用 `[[xxx]]` 来代表内部方法或内部槽
 
-如果一个对象作为函数调用，那么这个对象内部必须部署内部方法 [[Call]]
+如果一个对象作为函数调用，那么这个对象内部必须部署内部方法 `[[Call]]`
 
-代理对象和普通对象没有太大区别，区别在于内部方法 [[Get]] 的实现。如果在创建代理对象时，没有指定对应的拦截函数，内部 [[Get]] 方法就会调用原始对象来获取属性值
+一个对象不仅部署了 `[[Get]]` 这个内部方法，还有很多其他的内部方法。[相关链接](https://tc39.es/ecma262/#sec-invariants-of-the-essential-internal-methods)
+
+代理对象和普通对象没有太大区别，区别在于内部方法 `[[Get]]` 的实现。如果在创建代理对象时，没有指定对应的拦截函数，内部 `[[Get]]` 方法就会调用原始对象来获取属性值
 
 Proxy 对象部署的所有内部方法
 |内部方法| 处理器函数（拦截函数）
 |-|-|
-| [[GetPrototypeOf]] | getPrototypeOf |
-| [[SetPrototypeOf]] | setPrototypeOf |
-| [[IsExtensible]] | isExtensible |
-| [[PreventExtensions]] | preventExtensions |
-| [[GetOwnProperty]] | getOwnPropertyDescriptor |
-| [[DefineOwnProperty]] | defineProperty |
-| [[HasProperty]] | has |
-| [[Get]] | get |
-| [[Set]] | set |
-| [[Delete]] | deleteProperty |
-| [[OwnPropertyKeys]] | ownKeys |
-| [[Call]] | apply |
-| [[Construct]] | construct |
+| `[[GetPrototypeOf]]` | getPrototypeOf |
+| `[[SetPrototypeOf]]` | setPrototypeOf |
+| `[[IsExtensible]]` | isExtensible |
+| `[[PreventExtensions]]` | preventExtensions |
+| `[[GetOwnProperty]]` | getOwnPropertyDescriptor |
+| `[[DefineOwnProperty]]` | defineProperty |
+| `[[HasProperty]]` | has |
+| `[[Get]]` | get |
+| `[[Set]]` | set |
+| `[[Delete]]` | deleteProperty |
+| `[[OwnPropertyKeys]]` | ownKeys |
+| `[[Call]]` | apply |
+| `[[Construct]]` | construct |
 
-其中，[[Call]] 和 [[Construct]] 这两个内部方法，只有当被代理的对象是函数和构造函数时才会部署。
+其中，`[[Call]]` 和 `[[Construct]]` 这两个内部方法，只有当被代理的对象是函数和构造函数时才会部署。
 
 由上面的表中，我们可以知道拦截删除属性操作时，可以使用 deleteProperty 拦截函数实现
 ```js
@@ -218,9 +220,9 @@ effect(() => {
 6. Return ? HasProperty(rval, ? ToPropertyKey(lval)).
 
 关键在第 6 步，in 操作符的运算结果是 HasProperty 对象返回的，我们在找到 [HasProperty](https://tc39.es/ecma262/#sec-hasproperty) 的操作
-1. Return ? O.[[HasProperty]](P)
+1. Return ? O.`[[HasProperty]]`(P)
 
-可以看到 HasProperty 的结果是调用内部的 [[HasProperty]] 方法得到的，[[HasProperty]] 对应的拦截方法是 has
+可以看到 HasProperty 的结果是调用内部的 `[[HasProperty]]` 方法得到的，`[[HasProperty]]` 对应的拦截方法是 has
 
 因此，我们可以通过 has 拦截函数实现对 in 操作符的代理
 ```js
@@ -402,13 +404,13 @@ delete p.foo
 5. If IsPropertyReference(ref) is true, then
   a. Assert: IsPrivateReference(ref) is false.
   b. If IsSuperReference(ref) is true, throw a ReferenceError exception.
-  c. Let baseObj be ? ToObject(ref.[[Base]]).
-  d. Let deleteStatus be ? baseObj.[[Delete]](ref.[[ReferencedName]]).
-  e. If deleteStatus is false and ref.[[Strict]] is true, throw a TypeError exception.
+  c. Let baseObj be ? ToObject(ref.`[[Base]]`).
+  d. Let deleteStatus be ? baseObj.`[[Delete]]`(ref.`[[ReferencedName]]`).
+  e. If deleteStatus is false and ref.`[[Strict]]` is true, throw a TypeError exception.
   f. Return deleteStatus.
 ```
 
-在第 5 步的 d 子步骤可知， delete 操作的行为依赖 [[Delete]] 内部方法，该内部方法对应的拦截函数为 deleteProperty
+在第 5 步的 d 子步骤可知， delete 操作的行为依赖 `[[Delete]]` 内部方法，该内部方法对应的拦截函数为 deleteProperty
 
 所以可以使用 deleteProperty 对删除属性进行拦截
 ```js
@@ -529,7 +531,7 @@ child.bar = 2
 * 当我们访问 child.bar 时，会将副作用函数添加到依赖中（child.bar）
 * 由于 child 并不存在 bar 属性，所以会从原型上获取
 * 访问原型的属性时，由于 parent 也是响应式的，所以会再次被添加到依赖中（parent.bar）
-* 当设置 child.bar 的值时，会触发 child 的 set 拦截函数，使用 Reflect.set 会调用 obj对象上内部的 [[set]] 方法
+* 当设置 child.bar 的值时，会触发 child 的 set 拦截函数，使用 Reflect.set 会调用 obj对象上内部的 `[[set]]` 方法
 * 如果设置的属性在对象上不存在，就会取得原型并调用原型的 set 方法，这就会导致，虽然我们设置的是 child.bar ，但还是会执行 parent.bar 的拦截函数被执行
 
 解决的办法就是屏蔽 parent.bar 触发的副作用函数给屏蔽就可以了。两次更新是由于 parent.bar 触发的副作用函数
@@ -644,7 +646,7 @@ function reactive(data) {
  }
 ```
 ### 浅响应
-有的时候我们希望我们的数据时浅响应的（shallowReactive），就是只有第一层属性是响应的，这时我们只需要在我们原来的代码中稍加修改就可以了
+有的时候我们希望我们的数据是浅响应的（shallowReactive），就是只有第一层属性是响应的，这时我们只需要在我们原来的代码中稍加修改就可以了
 ```js
  function createReactive(data, isShallow = false) {
     return new Proxy(data, {
@@ -666,11 +668,421 @@ function reactive(data) {
     })
  }
 //  浅响应
-function shawReactive(data) {
+function shallowReactive(data) {
     return createReactive(data, true)
 }
 // 深响应
 function reactive(data) {
     return createReactive(data)
 }
+```
+## 只读和浅只读
+有时候我们希望我们的数据时只读的，当用户修改数据时，会给用户一个警告。例如组件接收的 props。
+```js
+const obj = readonly({foo: 1})
+// 尝试修改数据，会给出一条警告
+obj.foo = 2
+```
+为 createReactive 函数增加第三个参数 isReadonly
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            // 如果属性是只读的，就打印信息并返回
+            if (isReadonly) {
+                console.warn(`属性 ${key} 是只读的`)
+                return
+            }
+            const oldVal = target[key]
+            const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+            const res = Reflect.set(target, key, newVal, receiver)
+            if (target === receiver.raw) {
+                if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+                    trigger(target, key, type)
+                }
+            }
+            return res
+        },
+        deleteProperty(target, key) {
+            // 如果属性是只读的，就打印信息并返回
+            if (isReadonly) {
+                console.warn(`属性 ${key} 是只读的`)
+                return
+            }
+            const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+            const res = Reflect.deleteProperty(target, key)
+            if (res && hadKey) {
+                trigger(target, key, TriggerType.DEL)
+            }
+        }
+    })
+}
+```
+修改操作可以在 set 和 deleteProperty 拦截函数进行拦截，如果数据时**只读**的，那么就**无法修改**它。所以也**没必要为只读数据建立响应联系**
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if (key === 'raw') {
+                return target
+            }
+            // 非只读才需要建立响应联系
+            if (!isReadonly) {
+                track(target, key)
+            }
+            
+            const res = Reflect.get(target, key, receiver)
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                return reactive(res)
+            }
+            return res
+        }
+    })
+}
+function readonly(data) {
+    return reactive(data, false, true)
+}
+```
+上面代码中实现的是浅只读的
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 代理对象可以通过 raw 属性访问原始数据
+            if (key === 'raw') {
+                return target
+            }
+            // 非只读才需要建立响应联系
+            if (!isReadonly) {
+                track(target, key)
+            }
+            
+            const res = Reflect.get(target, key, receiver)
+            // 浅只读它的属性不是相应式的
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                // 如果是只读，调用 readonly 进行包装
+                return isReadonly ? readonly(res) : reactive(res)
+            }
+            return res
+        }
+    })
+}
+```
+对于深只读，我们需要把它的属性值也调用 readonly 函数进行包装
+```js
+function readonly(data) {
+    return reactive(data, false, true)
+}
+function shallowReadonly(data) {
+    return reactive(data, true, true)
+}
+```
+对于浅只读，只需要修改第二个参数 isShallow 为 true 就可以了（既是浅只读，也是浅相应）。
+## 代理数组
+在 JavaScript 中，数组只是一个普通的对象，对数组的代理需要了解它与普通对象有什么区别。数组是一个异质对象，因为数组内部的 `[[DefineOwnProperty]]` 这个内置方法与常规对象不同。除了 `[[DefineOwnProperty]]` 这个内部方法外，其他内部方法逻辑都与常规相同。所以，实现数组对象的代理，代理普通对象的绝大部分代码可以继续使用
+```js
+const arr = reactive([1, 2, 3])
+effect(() => {
+    console.log(arr[1]) 
+})
+// 可以触发响应
+arr[1] = 3
+```
+数组与普通对象的操作有所不同，下面列举了所有数组元素的读取操作
+* 通过索引访问数组的元素值
+* 访问数组的长度
+* 把数组作为对象，使用 for...in 循环遍历
+* 使用 for...of 迭代遍历数组
+* 数组的原型方法。（如 concat 、join 、 every 、 some 、 find 、 findIndex 、 includes 等）
+
+对数组的设置操作
+* 通过索引修改数组的元素值
+* 修改数组的长度
+* 数组的栈方法 （如push 、 pop 、 shift 、 unshift）
+* 修改原数组的原型方法 （如splice 、fill 、sort）
+
+### 数组的索引与 length
+当我们通过索引修改数组元素的值时，会执行数组内部所部署的内部方法 `[[Set]]` ，`[[Set]]` 方法依赖于 `[[DefineOwnProperty]]`。[相关链接](https://tc39.es/ecma262/#sec-array-exotic-objects-defineownproperty-p-desc)
+
+由规范可知，如果设置数组的索引大于数组的长度，那么要更新数组的 length 属性，在触发响应时，也应该触发与 length 相关的副作用函数，我们需要修改 set 拦截函数
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            if (isReadonly) {
+                console.warn(`属性 ${key} 是只读的`)
+                return
+            }
+            const oldVal = target[key]
+
+            const type = Array.isArray(target)
+                // 数组对象 设置的索引值 < 数组的长度，就是 SET 否则是 ADD
+                ? Number(key) < target.length ? TriggerType.SET : TriggerType.ADD
+                // 普通对象
+                : Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+
+            const res = Reflect.set(target, key, newVal, receiver)
+            // receiver 是 target 的代理对象
+            if (target === receiver.raw) {
+                if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+                    trigger(target, key, type)
+                }
+            }
+            return res
+        },
+    })
+}
+```
+在 set 拦截函数中，如果目标对象是数组
+* 索引值 < 数组长度 ， type 就是 SET
+* 否则 type 就是 ADD
+
+有了类型 type 之后，就可以在 trigger 函数中正确的触发响应
+```js
+function trigger(target, key, type) {
+    ...
+    // 操作类型是 ADD 且 是数组时，应执行所有与 length 相关的副作用函数
+    if(type === TriggerType.ADD && Array.isArray(target)){
+        const lengthEffects = depsMap.get('length')
+        lengthEffects && lengthEffects.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+    }
+    ...
+}
+```
+反过来，当修改数组的 length 属性也会隐式地影响数组元素。例如
+```js
+const arr = reactive([1, 2, 3])
+
+// 会受到影响
+effect(() => {
+    console.log(arr[2])
+})
+
+// 不会受到影响
+effect(() => {
+    console.log(arr[0])
+})
+arr.length = 1
+```
+当设置的 length 的值比访问的索引值小时，会触发响应。这就需要我们把新设置的属性值传递给 trigger 函数
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        set(target, key, newVal, receiver) {
+            if (isReadonly) {
+                console.warn(`属性 ${key} 是只读的`)
+                return
+            }
+            const oldVal = target[key]
+
+            const type = Array.isArray(target)
+                ? Number(key) < target.length
+                    ? TriggerType.SET : TriggerType.ADD
+                : Object.prototype.hasOwnProperty.call(target, key)
+                    ? TriggerType.SET : TriggerType.ADD
+
+            const res = Reflect.set(target, key, newVal, receiver)
+            if (target === receiver.raw) {
+                if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+                    // 将新的属性值传递给 trigger 函数
+                    trigger(target, key, type, newVal)
+                }
+            }
+            return res
+        }
+    })
+}
+```
+```js
+function trigger(target, key, type, newVal) {
+    ...
+    //  是数组时
+    if (Array.isArray(target)) {
+        // 操作类型是 ADD  应执行所有与 length 相关的副作用函数
+        if (type === TriggerType.ADD) {
+            const lengthEffects = depsMap.get('length')
+            lengthEffects && lengthEffects.forEach(effectFn => {
+                if (activeEffect !== effectFn) {
+                    effectsToRun.add(effectFn)
+                }
+            })
+        }
+        // 修改数组的长度
+        if (key === 'length') {
+            depsMap.forEach((effects, key) => {
+                // 当前索引 >= 新设置的数组的长度时，需要执行副作用函数
+                if (key >= newVal) {
+                    effects.forEach(effectFn => {
+                        if (activeEffect !== effectFn) {
+                            effectsToRun.add(effectFn)
+                        }
+                    })
+                }
+            })
+        }
+    }
+    ...
+}
+```
+### for...in
+我们应该**尽量避免**使用 for...in 循环遍历数组。语法上可以使用，所以也应该考虑这种情况
+```js
+const arr = reactive([1, 2, 3])
+effect(() => {
+    for(let k in arr){
+        console.log(k)
+    }
+})
+```
+数组对象的 for...in 循环与遍历的常规对象并无差异，因此可以使用 ownKeys 拦截函数进行拦截。
+
+之前实现的拦截函数
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+        return new Proxy(data, {
+            ownKeys(target, key) {
+                track(target, ITERATE_KEY)
+                return Reflect.ownKeys(target)
+            }
+        })
+    }
+```
+对于普通对象，只有添加或删除属性时，会影响 for...in 遍历的结果，但数组有所不同
+* 添加新元素， arr[100] = 100
+* 修改数组元素，arr.length = 0
+
+无论为数组添加新元素，还是直接修改数组的长度，本质上都修改了数组的长度。都会影响 for...in 遍历的结果，所以在 ownKeys 拦截函数中，我们可以使用 length 作为 key 去作为响应联系
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        ownKeys(target, key) {
+            // 如果是数组，就使用 length 属性作为 key
+            Array.isArray(target) ? track(target, 'length') : track(target, ITERATE_KEY)
+            return Reflect.ownKeys(target)
+        }
+    })
+}
+```
+* 添加新元素， arr[100] = 100 
+  *  trigger 函数中会根据类型是 ADD，触发跟 length 相关的副作用函数， for...in 就会触发
+* 修改数组元素，arr.length = 0 
+  * trigger 函数会判断  当前索引 >= 新设置的数组的长度时，需要执行副作用函数
+  
+### for...of
+for...of 用来遍历**可迭代对象**的。ES2015 为 JavaScript 定义了[迭代协议](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Iteration_protocols)，它不是新的语法，而是一种协议。一个对象能否被迭代，取决于该对象或该对象的原型是否实现了 @@iterator 方法。
+::: tip 提示
+这里的 @@[name] 标志在 ESMAScript 规范里用来代指 JavaScript 内建的 symbols 值，@@iterator 指的就是 Symbol.iterator
+:::
+
+如果一个对象实现了 Symbol.iterator 方法， 那么这个对象就是可迭代的。例如
+```js
+const obj = {
+    val: 0,
+    [Symbol.iterator]() {
+        return {
+            next() {
+                return {
+                    value: obj.val++,
+                    done: obj.val > 10 ? true : false
+                }
+            }
+        }
+    }
+}
+for(const value of obj){
+    console.log(value) // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+}
+```
+对象 obj 实现了 Symbol.iterator 方法，因此可以使用 for...of 循环遍历它
+
+数组内建了 Symbol.iterator 方法的实现
+```js
+const arr = [1, 2, 3, 4, 5]
+
+const itr = arr[Symbol.iterator]()
+
+console.log(itr.next()) // {value: 1, done: false}
+console.log(itr.next()) // {value: 2, done: false}
+console.log(itr.next()) // {value: 3, done: false}
+console.log(itr.next()) // {value: 4, done: false}
+console.log(itr.next()) // {value: 5, done: false}
+console.log(itr.next()) // {value: undefined, done: true}
+
+for (let val of arr) {
+    console.log(val) // 1, 2, 3, 4, 5
+}
+```
+
+根据 ECMA 规范，数组迭代器质性会读取数组的 length 属性，如果迭代的是数组的元素值，还会读取数组的索引。下面是模拟数组迭代器的实现
+```js
+arr[Symbol.iterator] = function () {
+    const target = this
+    const len = target.length
+    let index = 0
+    return {
+        next() {
+            return {
+                value: index < len ? target[index] : undefined,
+                done: index++ > len
+            }
+        }
+    }
+}
+```
+所以，在不增加任何代码的情况下，我们的数组迭代方法也可以正确的触发响应
+```js
+const p = reactive([1, 2, 3, 4, 5])
+effect(() => {
+    for (const val of p) {
+        console.log(val)
+    }
+})
+// 能够触发响应
+p[1] = 22
+```
+数组的 values 方法的返回值实际上就是数组内建的迭代器
+```js
+console.log(Array.prototype.values === Array.prototype[Symbol.iterator]) // true
+```
+```js
+const p1 = reactive([1, 2, 3, 4, 5])
+effect(() => {
+    for (const val of p1.values()) {
+        console.log(val)
+    }
+})
+// 能够触发响应
+p1[1] = 22
+```
+无论是调用 for...of 循环，还是调用 values 方法等，他们都会读取 Symbol.iterator 属性，该属性是一个 symbol 值，为了避免发生意外以及性能上的考虑，不应该让副作用函数与 Symbol.iterator 这类 symbol 值之间建立响应联系。
+
+修改 get 拦截函数
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+        return new Proxy(data, {
+            get(target, key, receiver) {
+                if (key === 'raw') {
+                    return target
+                }
+                // key 是 symbol 则不追踪
+                if (!isReadonly && typeof key !== 'symbol') {
+                    track(target, key)
+                }
+
+                const res = Reflect.get(target, key, receiver)
+                if (isShallow) return res
+                if (typeof res === 'object' && res !== null) {
+                    return isReadonly ? readonly(res) : reactive(res)
+                }
+                return res
+            }
+        })
+    }
 ```
