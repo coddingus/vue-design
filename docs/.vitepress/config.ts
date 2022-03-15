@@ -32,7 +32,7 @@ export default defineConfig({
           { text: '框架设计的核心要素', link: '/guide/design/elements' },
           { text: 'Vue.js 3 的设计思路', link: '/guide/design/thinking' }
         ]
-      },{
+      }, {
         text: '响应系统',
         children: [
           { text: '响应系统的作用与实现', link: '/guide/reactivity/function-and-realization' },
@@ -40,8 +40,6 @@ export default defineConfig({
           { text: '原始值的响应式方案', link: '/guide/reactivity/original' }
         ]
       }],
-    },
-    search: true
+    }
   },
-
 })

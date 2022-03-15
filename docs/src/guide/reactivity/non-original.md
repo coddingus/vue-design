@@ -1066,23 +1066,168 @@ p1[1] = 22
 修改 get 拦截函数
 ```js
 function reactive(data, isShallow = false, isReadonly = false) {
-        return new Proxy(data, {
-            get(target, key, receiver) {
-                if (key === 'raw') {
-                    return target
-                }
-                // key 是 symbol 则不追踪
-                if (!isReadonly && typeof key !== 'symbol') {
-                    track(target, key)
-                }
-
-                const res = Reflect.get(target, key, receiver)
-                if (isShallow) return res
-                if (typeof res === 'object' && res !== null) {
-                    return isReadonly ? readonly(res) : reactive(res)
-                }
-                return res
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (key === 'raw') {
+                return target
             }
-        })
+            // key 是 symbol 则不追踪
+            if (!isReadonly && typeof key !== 'symbol') {
+                track(target, key)
+            }
+
+            const res = Reflect.get(target, key, receiver)
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                return isReadonly ? readonly(res) : reactive(res)
+            }
+            return res
+        }
+    })
+} 
+```
+### 数组的查找方法
+数组的内部方法都依赖了对象的基本语义，所以大多数情况下，我们无须做特殊处理即可达到预期
+```js
+const arr = reactive([1, 2])
+effect(() => {
+    console.log(arr[1])
+})
+arr[1] = 100 // 会触发副作用打印 false
+```
+这是因为 includes 方法为了找到给定的值，会访问数组的 length 属性以及数组的索引
+
+然而 incluses 方法并不总是能够达到预期
+```js
+const obj = {}
+const arr = reactive([obj])
+console.log(arr.includes(arr[0])) // false
+```
+当我们访问 includes 方法，内部方法会通过索引获取数组元素的值 ，会访问到 arr[0]，触发 get 方法拦截
+```js
+function reactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (typeof res === 'object' && res !== null) {
+                // 如果值时对象，就会调用 reactive 返回一个新的代理对象
+                return isReadonly ? readonly(res) : reactive(res)
+            }
+        }
+    })
+}
+```
+我们可以看到每次触发 get 方法，由于数组元素的值时对象，所以每次返回的都是一个新的代理对象，所以就导致 arr[0]!==arr[0]
+```js
+console.log(console.log(arr[0] === arr[0])) // false
+```
+所以，要解决这个问题，就要将我们代理过的对象保存下来，再次访问时不需要再重新创建
+
+先将原来的 reactive 函数名修改为 createReactive
+```js
+function createReactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (key === 'raw') {
+                return target
+            }
+            if (!isReadonly && typeof key !== 'symbol') {
+                track(target, key)
+            }
+            const res = Reflect.get(target, key, receiver)
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                return isReadonly ? readonly(res) : reactive(res)
+            }
+            return res
+        }
+    })
+}
+```
+在 reactive 函数中，我们使用一个 Map 用来存在代理对象的映射
+```js
+const reactiveMap = new Map()
+function reactive(data, isShallow = false, isReadonly = false) {
+    const exitProxyMap = reactiveMap.get(data)
+    if(exitProxyMap) return exitProxyMap
+    const proxy = createReactive(data, isShallow, isReadonly)
+    reactiveMap.set(data, proxy)
+    return proxy
+}
+```
+运行下面代码，发现符合预期
+```js
+console.log(arr.includes(arr[0])) // true
+```
+再看下面代码
+```js
+const obj = {}
+const arr = reactive([obj])
+console.log(arr.includes(obj)) // false
+```
+这个比较符合用户的习惯，我们知道，obj是原始对象，arr.includes 方法指向的是内部的代理对象，所以肯定查找不到
+
+所以，我们需要重写数组的 includes 方法并实现自定义行为
+```js {1-4,12-15}
+const arrayInstrumentations = {
+    includes() {
     }
+}
+function createReactive(data, isShallow = false, isReadonly = false) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (key === 'raw') {
+                return target
+            }
+            // 如果是数组并且 key 存在于 arrayInstrumentations 上 如 includes
+            if(Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)){
+                return Reflect.get(arrayInstrumentations, key, receiver)
+            }
+            if (!isReadonly && typeof key !== 'symbol') {
+                track(target, key)
+            }
+
+            const res = Reflect.get(target, key, receiver)
+            if (isShallow) return res
+            if (typeof res === 'object' && res !== null) {
+                return isReadonly ? readonly(res) : reactive(res)
+            }
+            return res
+        }
+    })
+}
+```
+执行 arr.includes 方法就相当于执行 arrayInstrumentations.includes 方法
+```js
+const originMethod = Array.prototype.includes
+const arrayInstrumentations = {
+    includes(...args) {
+        // 这里的 this 指向代理对象 
+        // 首先调用 代理对象的 includes 方法
+        let res = originMethod.apply(this, args)
+        if (res === false) {
+            // 调用原始对象的 includes 方法
+            res = originMethod.apply(this.raw, args)
+        }
+        return res
+    }
+}
+```
+执行过程中先调用代理对象的 includes 方法进行查找，如果查找不到，就调用原始对象的 includes 方法进行查找
+
+需要做类似的处理方法还有 indexOf 、lastIndexOf
+```js
+const originMethod = Array.prototype.includes
+const arrayInstrumentations = {}
+;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+    arrayInstrumentations[method] = function (...args) {
+        // 这里的 this 指向代理对象 
+        // 首先调用 代理对象的方法
+        let res = originMethod.apply(this, args)
+        if (res === false) {
+            // 调用原始对象的方法
+            res = originMethod.apply(this.raw, args)
+        }
+        return res
+    }
+})
 ```
