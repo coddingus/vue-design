@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数组查找方法</title>
+    <title>隐式修改数组长度的原型方法</title>
 </head>
 
 <body>
@@ -48,7 +48,7 @@
     const bucket = new WeakMap()
 
     function track(target, key) {
-        if (!activeEffect) return
+        if (!activeEffect || !shouldTrack) return
         let depsMap = bucket.get(target)
         if (!depsMap) {
             bucket.set(target, (depsMap = new Map()))
@@ -128,19 +128,29 @@
         return proxy
     }
     const arrayInstrumentations = {}
-    ;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
-        const originMethod = Array.prototype[method]
-        arrayInstrumentations[method] = function (...args) {
-            // 这里的 this 指向代理对象 
-            // 首先调用 代理对象的 includes 方法
-            let res = originMethod.apply(this, args)
-            if (res === false) {
-                // 调用原始对象的 includes 方法
-                res = originMethod.apply(this.raw, args)
+        ;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+            const originMethod = Array.prototype[method]
+            arrayInstrumentations[method] = function (...args) {
+                // 这里的 this 指向代理对象 
+                // 首先调用 代理对象的 includes 方法
+                let res = originMethod.apply(this, args)
+                if (res === false) {
+                    // 调用原始对象的 includes 方法
+                    res = originMethod.apply(this.raw, args)
+                }
+                return res
             }
-            return res
-        }
-    })
+        })
+    let shouldTrack = false
+        ;['push', 'pop', 'shift', 'unshift'].forEach(method => {
+            const originMethod = Array.prototype[method]
+            arrayInstrumentations[method] = function (...args) {
+                shouldTrack = false
+                let res = originMethod.apply(this, args)
+                shouldTrack = true
+                return res
+            }
+        })
 
     function createReactive(data, isShallow = false, isReadonly = false) {
         return new Proxy(data, {
@@ -291,18 +301,13 @@
     }
 </script>
 <script>
-    // const arr = reactive([1, 2])
-    // effect(() => {
-    //     console.log(arr.includes(2))
-    // })
-    // arr[1] = 100
-    // const obj = {}
-    // const arr = reactive([obj])
-    // console.log(arr.includes(arr[0])) // false
-
-    const obj = {}
-    const arr = reactive([obj])
-    console.log(arr.includes(obj)) // false
+    const arr = reactive([])
+    effect(() => {
+        arr.push(1)
+    })
+    effect(() => {
+        arr.push(2)
+    })
 </script>
 
 </html>

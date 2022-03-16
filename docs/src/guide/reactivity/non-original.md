@@ -1216,9 +1216,9 @@ const arrayInstrumentations = {
 
 需要做类似的处理方法还有 indexOf 、lastIndexOf
 ```js
-const originMethod = Array.prototype.includes
 const arrayInstrumentations = {}
 ;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+    const originMethod = Array.prototype[method]
     arrayInstrumentations[method] = function (...args) {
         // 这里的 this 指向代理对象 
         // 首先调用 代理对象的方法
@@ -1227,7 +1227,134 @@ const arrayInstrumentations = {}
             // 调用原始对象的方法
             res = originMethod.apply(this.raw, args)
         }
+        return resv
+    }
+})
+```
+### 隐式修改数组长度的原型方法
+隐式修改数组长度的方法主要是栈方法，例如 push 、pop 、 shift 、 unshift 、 splice
+
+以 push 方法为例，从[push 方法的执行流程](https://tc39.es/ecma262/#sec-array.prototype.push)中，第 2 步 和第 6 步可知，当调用数组的 push 方法时，既会读取数组的 length 属性，也会设置数组的 length 属性，这会导致两个独立的副作用函数相互影响。
+
+例如下面代码
+```js
+const arr = reactive([])
+effect(() => {
+    arr.push(1)
+})
+effect(() => {
+    arr.push(2)
+})
+```
+运行后会得到栈移除的错误
+```
+Uncaught RangeError: Maximum call stack size exceeded
+```
+问题的原因就是 push 方法会间接读取 length 的属性，所以需要屏蔽对length 属性的读取即可，从而避免它与副作用函数之间建立响应联系。因为数组的 push 方法在语义上是修改操作，而非读取操作。
+```js
+let shouldTrack = false
+;['push'].forEach(method => {
+    const originMethod = Array.prototype[method]
+    arrayInstrumentations[method] = function (...args) {
+        shouldTrack = false
+        let res = originMethod.apply(this, args)
+        shouldTrack = true
         return res
     }
 })
 ```
+使用 shouldTrack 做标记，当我们调用 push 时， shouldTrack 赋值为 false ，执行原始的 push 方法会执行 track 函数，在track 函数中根据 shouldTrack 来判断它是否需要追踪，shouldTrack 是 false ，就直接返回。执行完原始的 push 方法后，就将 shouldTrack 值还原为 true
+```js
+function track(target, key) {
+    // shouldTrack 为 false 直接返回
+    if (!activeEffect || !shouldTrack) return
+    ...
+}
+```
+再执行之前的测试代码，能够正常运行
+
+除了 push ，pop 、 shift 、 unshift 、 splice 都需要类似的处理
+```js
+let shouldTrack = false
+;['push', 'pop', 'shift', 'unshift'].forEach(method => {
+    const originMethod = Array.prototype[method]
+    arrayInstrumentations[method] = function (...args) {
+        shouldTrack = false
+        let res = originMethod.apply(this, args)
+        shouldTrack = true
+        return res
+    }
+})
+```
+## 代理集合类型
+集合类型包括 Map/Set 以及 WeakMap/WeakSet。
+
+使用 Proxy 代理集合类型的数据与代理普通对象不同，因为集合类型的操作与普通对象存在很大的不同
+
+* [Set 相关介绍](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Set)
+*  [Map 相关介绍](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Map)
+
+[Set](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Set) 和 [Map](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Map)  这两种数据类型的操作方法类似，它们之间最大的不同在于 Set 类型使用 add(value) 添加元素， 而 Map 类型使用 set(key, value) 方法设置键值对，并且 Map 类型可以使用 get(key) 方法读取相应的值。所以，大多数情况下我们可以使用相同的方法来处理 Set 和 Map 。
+### 如何代理 Set 和 Map
+执行下面代码，我们希望修改后能正常触发响应
+```js
+const p = reactive(new Map([['key', '1']]))
+effect(() => {
+    console.log(p.get('key'))
+})
+p.set('key', 2) // 能触发响应
+```
+但实际上会报错
+```
+Uncaught TypeError: Method Map.prototype.get called on incompatible receiver 
+```
+同样运行下面代码也会报错
+```js
+const s = reactive(new Set([1, 2, 3]))
+console.log(s.size)
+```
+[查看 Set.prototype.set 的执行过程](https://tc39.es/ecma262/#sec-get-set.prototype.size)，关键在第 1 步和第 2 步，第 1 步中，this 指向代理对象（因为是通过代理对象访问的），第 2 步，调用抽象方法 `RequireInternalSlot(M, [[SetData]])` 来检查代理对象 M 是否存在内部槽 `[[MapData]]`，代理对象中不存在 `[[SetData]]` ，所以执行后就会抛出错误
+
+为了解决这个问题，我们需要修正访问器的 getter 函数执行时 this 的指向
+```js
+// 为了简洁，这里只做 map set 的处理
+function createReactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 如果是 size 属性，
+            // 指定 receiver 为原始对象 target 从而修复问题
+            if (key === 'size') {
+                return Reflect.get(target, key, target)
+            }
+            return Reflect.get(target, key, receiver)
+        }
+    })
+}
+```
+再次运行，发现运行后结果正常
+```js
+const s = reactive(new Set([1, 2, 3]))
+console.log(s.size) // 3
+```
+在之前，我们看到调用 map.get 同样会报错，s.size 与 p.get 不同，当访问 p.get 时（访问时 p.get 方法并没有执行），无论怎么修改 receiver ，执行 get 方法时的 this 指向都是代理对象，我们可以在 getter 方法中把 get 方法与原始数据绑定在一起即可
+```js
+function createReactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (key === 'size') {
+                return Reflect.get(target, key, target)
+            }
+            // 改变执行方法时的 this 指向
+            return target[key].bind(target)
+        }
+    })
+}
+```
+运行后，代码正常工作
+```js
+const p = reactive(new Map([['key', '1']]))
+effect(() => {
+    console.log(p.get('key')) // 1
+})
+```
+### 建立响应联系
