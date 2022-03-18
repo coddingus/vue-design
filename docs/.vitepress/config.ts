@@ -61,57 +61,31 @@ const sidebar = {
     ]
   }],
 }
-// export default defineConfigWithTheme<ThemeConfig>({
-//   extends: baseConfig,
-//   title: 'Vue.js 设计与实现',
-//   description: '《Vue.js 设计与实现》笔记',
-//   base: '/vue-design/',
-//   srcDir: 'src',
-//   outDir: '../dist',
-//   head: [
-//     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
-//   ],
-//   themeConfig: {
-//     // logo: '/logo.svg',
-//     nav,
-//     sidebar,
-//     socialLinks: [
-//       { icon: 'github', link: 'https://github.com/coddingus/vue-design' }
-//     ],
-
-
-//     footer: {
-//       copyright: `Copyright © 2022-${new Date().getFullYear()} Shibin You`
-//     }
-//   },
-//   vue: {
-//     reactivityTransform: true
-//   },
-// })
 export default defineConfigWithTheme<ThemeConfig>({
   extends: baseConfig,
-
-  lang: 'en-US',
-  title: 'Vue.js',
-  description: 'Vue.js - The Progressive JavaScript Framework',
+  title: 'Vue.js 设计与实现',
+  description: '《Vue.js 设计与实现》笔记',
+  base: '/vue-design/',
   srcDir: 'src',
-  scrollOffset: 'header',
-
-
+  outDir: '../dist',
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
+  ],
   themeConfig: {
+    // logo: '/logo.svg',
     nav,
     sidebar,
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/coddingus/vue-design' }
+    ],
+
+
     footer: {
-      license: {
-        text: 'MIT License',
-        link: 'https://opensource.org/licenses/MIT'
-      },
-      copyright: `Copyright © 2014-${new Date().getFullYear()} Evan You`
+      copyright: `Copyright © 2022-${new Date().getFullYear()} Shibin You`
     }
   },
-
-
   vue: {
     reactivityTransform: true
-  }
+  },
 })
+
