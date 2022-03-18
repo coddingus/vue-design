@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>如何代理 Set 和 Map</title>
+</head>
+
+<body>
+
+</body>
+<script src="./js/effect.js"></script>
+<script src="./js/reactive.js"></script>
+<script>
+
+    const s = reactive(new Set([1, 2, 3]))
+    effect(() => {
+        console.log(s.size)
+    })
+    s.add(4) //触发响应
+    s.add(4) 
+</script>
+
+</html>

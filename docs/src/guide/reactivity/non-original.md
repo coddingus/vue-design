@@ -1,3 +1,6 @@
+---
+outline: deep
+---
 # 非原始值的响应式方案
 前面介绍了响应式数据的基本原理，这节把焦点放在响应式数据本身。实现响应式数据远比我们想象的难很多，不想我们前面讲的那样。比如如何拦截 for...in 循环？ track 函数如何追踪拦截 for...in 循环？ 类似的问题还有很多。除此之外，还应考虑如何对数组进行代理，Vue.js 还支持集合类型（如 Map 、WeakMap 、 Set 、WeakSet 等），如何对集合类型进行代理。
 
@@ -1252,7 +1255,7 @@ Uncaught RangeError: Maximum call stack size exceeded
 ```
 问题的原因就是 push 方法会间接读取 length 的属性，所以需要屏蔽对length 属性的读取即可，从而避免它与副作用函数之间建立响应联系。因为数组的 push 方法在语义上是修改操作，而非读取操作。
 ```js
-let shouldTrack = false
+let shouldTrack = true
 ;['push'].forEach(method => {
     const originMethod = Array.prototype[method]
     arrayInstrumentations[method] = function (...args) {
@@ -1275,7 +1278,7 @@ function track(target, key) {
 
 除了 push ，pop 、 shift 、 unshift 、 splice 都需要类似的处理
 ```js
-let shouldTrack = false
+let shouldTrack = true
 ;['push', 'pop', 'shift', 'unshift'].forEach(method => {
     const originMethod = Array.prototype[method]
     arrayInstrumentations[method] = function (...args) {
@@ -1358,3 +1361,148 @@ effect(() => {
 })
 ```
 ### 建立响应联系
+之前实现了数据的代理并没有实现响应，下面来实现 Set 类型的响应方案，以下面代码为例
+```js
+const s = reactive(new Set([1, 2, 3]))
+effect(() => {
+    console.log(s.size)
+})
+s.add(4) // 触发响应
+```
+为了能够正常触发响应，我们需要在访问 size 属性时，调用 track 函数进行依赖追踪
+```js
+function createReactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            if (key === 'size') {
+                // 调用 track 函数，建立响应联系
+                track(target, ITERATE_KEY)
+                return Reflect.get(target, key, target)
+            }
+            return target[key].bind(target)
+        }
+    })
+}
+```
+需要注意的是，响应联系需要建立在 ITERATE_KEY 与副作用函数间，因为任何新增、删除的操作都会影响到 size 属性。
+
+当调用 add 方法向集合中添加新元素时，需要实现一个自定义的 add 方法
+```js
+// 定义一个对象，将自定义方法 add 添加到该对象下
+const mutableInstrumentations = {
+    add(key) {
+        // key  就是我们调用代理对象的 add 方法传递进来的
+        // 例如 s.add(4) key 就是 4 ，此时的 this 就是代理对象 s
+    }
+}
+function createReactive(data) {
+    return new Proxy(data, {
+        get(target, key, receiver) {
+            // 通过 raw 属性 可以访问到 target
+            if(key === 'raw') return target
+
+            if (key === 'size') {
+                // 调用 track 函数，建立响应联系
+                track(target, ITERATE_KEY)
+                return Reflect.get(target, key, target)
+            }
+            // 返回定义在 mutableInstrumentations 对象下的方法
+            return mutableInstrumentations[key]
+        }
+    })
+}
+```
+下面实现自定义 add 方法
+```js
+const mutableInstrumentations = {
+    add(key) {
+        const target = this.raw
+        // 此时不需要 bind,因为是通过原始对象 target 调用的
+        const res = target.add(key)
+        trigger(target, key, TriggerType.ADD)
+        return res
+    }
+}
+```
+这里可以回顾下前面 trigger 函数的实现
+```js
+function trigger(target, key, type, newVal) {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    // 取得所有与 key 关联的副作用函数
+    const deps = depsMap.get(key)
+    // 取得所有与 ITERATE_KEY 关联的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+
+    const effectsToRun = new Set()
+    deps && deps.forEach(effectFn => {
+        if (activeEffect !== effectFn) {
+            effectsToRun.add(effectFn)
+        }
+    })
+    //  是数组时，
+    if (Array.isArray(target)) {
+        ...
+    }
+    // type 为 ADD 或 DEL 时，执行所有跟 ITERATE_KEY 关联的副作用函数
+    if (type === TriggerType.ADD || type === TriggerType.DEL) {
+        iterateEffects && iterateEffects.forEach(effectFn => {
+            if (activeEffect !== effectFn) {
+                effectsToRun.add(effectFn)
+            }
+        })
+    }
+
+    effectsToRun.forEach(effectFn => {
+        if (effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn)
+        } else {
+            effectFn()
+        }
+    })
+}
+```
+当 type 为 DEL 或 ADD 时，就会执行所有跟 ITERATE_KEY 相关联的副作用函数，这样就可以触发 size 属性所收集的副作用函数来执行了
+
+运行下面代码，可以正常触发响应
+```js
+const s = reactive(new Set([1, 2, 3]))
+effect(() => {
+    console.log(s.size)
+})
+s.add(4) // 触发响应
+```
+但是如果多次添加相同的值，还是能触发响应。
+```js
+s.add(4) 
+s.add(4)
+```
+因为 Set 中的元素是唯一的，所以当我们向 Set 集合中添加已存在的元素时，不应该触发响应，所以需要进行下面优化
+```js
+const mutableInstrumentations = {
+    add(key) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        const res = target.add(key)
+        // 不存在时，才需要触发响应
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        }
+        return res
+    }
+}
+```
+在上面的基础上，可以使用类似的方法实现 delete 方法
+```js
+const mutableInstrumentations = {
+    delete(key){
+        const target = this.raw
+        const hadKey = target.has(key)
+        const res = target.delete(key)
+        if(hadKey) {
+            trigger(target, key, TriggerType.DEL)
+        }
+        return res
+    }
+}
+```

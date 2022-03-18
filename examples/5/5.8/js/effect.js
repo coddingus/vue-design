@@ -1,8 +1,3 @@
-const TriggerType = {
-    SET: 'SET',
-    ADD: 'ADD',
-    DEL: 'DEL'
-}
 let activeEffect
 const effectStack = []
 function effect(fn, options = {}) {

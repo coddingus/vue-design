@@ -1,4 +1,9 @@
 const bucket = new WeakMap()
+const TriggerType = {
+    SET: 'SET',
+    ADD: 'ADD',
+    DEL: 'DEL'
+}
 
 function track(target, key) {
     if (!activeEffect || !shouldTrack) return
@@ -94,7 +99,7 @@ const arrayInstrumentations = {}
             return res
         }
     })
-let shouldTrack = false
+let shouldTrack = true
     ;['push', 'pop', 'shift', 'unshift'].forEach(method => {
         const originMethod = Array.prototype[method]
         arrayInstrumentations[method] = function (...args) {
@@ -104,14 +109,40 @@ let shouldTrack = false
             return res
         }
     })
-
+const mutableInstrumentations = {
+    add(key) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        // 不存在时，才需要触发响应
+        const res = target.add(key)
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        }
+        return res
+    },
+    delete(key){
+        const target = this.raw
+        const hadKey = target.has(key)
+        const res = target.delete(key)
+        if(hadKey){
+            trigger(target, key, TriggerType.DEL)
+        }
+        return res
+    }
+}
 function createReactive(data) {
     return new Proxy(data, {
         get(target, key, receiver) {
+            // 通过 raw 属性 可以访问到 target
+            if (key === 'raw') return target
+
             if (key === 'size') {
+                // 调用 track 函数，建立响应联系
+                track(target, ITERATE_KEY)
                 return Reflect.get(target, key, target)
             }
-            return target[key].bind(target)
+            // 返回定义在 mutableInstrumentations 对象下的方法
+            return mutableInstrumentations[key]
         }
     })
 }

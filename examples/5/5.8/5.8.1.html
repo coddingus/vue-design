@@ -17,7 +17,8 @@
 
     const proxy = reactive(new Map([['key', '1']]))
     effect(() => {
-        console.log(proxy.get('key'))
+        console.log('effect:', proxy.get('key'))
+
     })
     proxy.set('key', 2)
 

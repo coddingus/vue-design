@@ -141,7 +141,7 @@
                 return res
             }
         })
-    let shouldTrack = false
+    let shouldTrack = truue
         ;['push', 'pop', 'shift', 'unshift'].forEach(method => {
             const originMethod = Array.prototype[method]
             arrayInstrumentations[method] = function (...args) {
