@@ -13,8 +13,7 @@ const nav = [
       { text: 'Vue.js 文档', link: 'https://vuejs.org' },
       { text: 'Vue.js 2 文档', link: 'https://v2.vuejs.org' }
     ]
-  },
-  { text: 'Github', link: 'https://github.com/coddingus/vue-design' },
+  }
 ]
 const sidebar = {
   '/guide/': [{
@@ -81,7 +80,7 @@ export default defineConfigWithTheme<ThemeConfig>({
 
 
     footer: {
-      copyright: `Copyright © 2022-${new Date().getFullYear()} Shibin You`
+      copyright: `Created By Shibin You`
     }
   },
   vue: {

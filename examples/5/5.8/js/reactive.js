@@ -110,6 +110,29 @@ let shouldTrack = true
         }
     })
 const mutableInstrumentations = {
+    get(key) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        track(target, key)
+        if (hadKey) {
+            const res = target.get(key)
+            return typeof res === 'object' ? reactive(res) : res
+        }
+    },
+    set(key, value) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        const oldVal = target.get(key)
+        // 通过 value.raw 获取原始数据，value.raw 不存在时，说明 value 就是原始数据
+        const rawValue = value.raw || value
+        target.set(key, rawValue)
+        // 如果 key 不存在说明是 ADD 类型
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+            trigger(target, key, TriggerType.SET)
+        }
+    },
     add(key) {
         const target = this.raw
         const hadKey = target.has(key)
@@ -120,14 +143,19 @@ const mutableInstrumentations = {
         }
         return res
     },
-    delete(key){
+    delete(key) {
         const target = this.raw
         const hadKey = target.has(key)
         const res = target.delete(key)
-        if(hadKey){
+        if (hadKey) {
             trigger(target, key, TriggerType.DEL)
         }
         return res
+    },
+    forEach(callback) {
+        const target = this.raw
+        track(target, ITERATE_KEY)
+        target.forEach(callback)
     }
 }
 function createReactive(data) {

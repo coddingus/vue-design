@@ -949,13 +949,13 @@ effect(() => {
 之前实现的拦截函数
 ```js
 function reactive(data, isShallow = false, isReadonly = false) {
-        return new Proxy(data, {
-            ownKeys(target, key) {
-                track(target, ITERATE_KEY)
-                return Reflect.ownKeys(target)
-            }
-        })
-    }
+    return new Proxy(data, {
+        ownKeys(target, key) {
+            track(target, ITERATE_KEY)
+            return Reflect.ownKeys(target)
+        }
+    })
+}
 ```
 对于普通对象，只有添加或删除属性时，会影响 for...in 遍历的结果，但数组有所不同
 * 添加新元素， arr[100] = 100
@@ -1495,7 +1495,7 @@ const mutableInstrumentations = {
 在上面的基础上，可以使用类似的方法实现 delete 方法
 ```js
 const mutableInstrumentations = {
-    delete(key){
+    delete(key) {
         const target = this.raw
         const hadKey = target.has(key)
         const res = target.delete(key)
@@ -1506,3 +1506,153 @@ const mutableInstrumentations = {
     }
 }
 ```
+### 避免污染原始数据
+Map 数据类型有 get 和 set 两个方法，当调用 get 时，需要调用 track 追踪依赖并建立响应联系，当调用 set 方法时，需要调用 trigger 方法触发响应。
+
+例如下面代码：
+```js
+const p = reactive(new Map([['key', 1]]))
+effect(() => {
+    console.log(p.get('key'))
+})
+p.set('key', 2) // 触发响应
+```
+调用 get 方法的实现跟前面实现 add 方法类似
+```js
+const mutableInstrumentations = {
+    get(key) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        track(target, key)
+        if(hadKey) {
+            const res = target.get(key)
+            return typeof res === 'object' ? reactive(res) : res
+        }
+    }
+}
+```
+调用 set 方法时，需要调用 trigger 函数触发响应
+```js
+const mutableInstrumentations = {
+    set(key, value) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        const oldVal = target.get(key)
+        target.set(key,value)
+        // 如果 key 不存在说明是 ADD 类型
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        } else if(oldVal!== value || (oldVal=== oldVal && value === value)){
+            trigger(target, key, TriggerType.SET)
+        }
+    }
+}
+```
+设置 key 时，需要判断 key 是否存在，来区分是 ADD 还是 SET 类型，SET 和 ADD 最终触发的副作用函数是不同的，因为 ADD 类型操作会对数据 size 属性产生影响。
+
+运行后，我们发现 set 函数能正常工作，但它存在问题。看下面代码
+```js
+const m = new Map()
+const p1 = reactive(m)
+const p2 = reactive(new Map())
+
+p1.set('p2', p2)
+
+effect(() => {
+    // 通过原始数据 m 访问 p2
+    console.log(m.get('p2').size)
+})
+// 原始数据 m 为 p2 设置一个键值对
+m.get('p2').set('foo', 1) // 会触发响应
+```
+上面代码中通过原始数据 m 修改 p2 属性，此时副作用函数重新执行了。原始数据不应该具有响应式数据的能力，否则就意味着用户既可以操作原始数据又可以操作代理数据，就乱套了。
+
+导致问题的原因就在 set 方法里
+```js
+const mutableInstrumentations = {
+    set(key, value) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        const oldVal = target.get(key)
+        // 把 value 原封不动的设置到原始数据上
+        target.set(key, value)
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+            trigger(target, key, TriggerType.SET)
+        }
+    }
+}
+```
+在 set 方法内，我们原封不动的把 value 设置到了原始数据上，如果 value 是相应式数据，那么设置到原始对象上的也是响应式数据。这里把**响应式数据设置到原始数据上的行为成为数据污染**。
+
+要解决数据污染也很简单，只需要获取 value 的原始数据就可以了
+```js {7-9}
+const mutableInstrumentations = {
+    set(key, value) {
+        const target = this.raw
+        const hadKey = target.has(key)
+        const oldVal = target.get(key)
+
+        // 通过 value.raw 获取原始数据，value.raw 不存在时，说明 value 就是原始数据
+        const rawValue = value.raw || value
+        target.set(key, rawValue)
+
+        if (!hadKey) {
+            trigger(target, key, TriggerType.ADD)
+        } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+            trigger(target, key, TriggerType.SET)
+        }
+    }
+}
+```
+通过这样设置，就不会产生数据污染了。
+
+上面代码中，我们一直使用 raw 属性来访问原始数据时有缺陷的，因为它可以会与用户自定义的 raw 属性冲突，所以，我们需要使用一个唯一的标识来作为访问原始数据的键，例如使用 Symbol 类型来代替
+
+### 处理 forEach
+集合类型的 forEach 方法类似于数据的 forEach 方法
+```js
+const m = new Map([
+    [{ key: 1 }, { value: 1 }]
+])
+effect(() => {
+    m.forEach((value, key) => {
+        console.log(value) // {value: 1}
+        console.log(key) // { key: 1 }
+    })
+})
+```
+遍历操作只与键值对的数量有关，因此任何修改 Map 对象对数量的操作都应该能触发副作用函数重新执行。例如 add 、delete 等方法。
+
+当 forEach 方法调用时，应该让副作用函数与 ITERATE_KEY 建立响应联系
+```js
+const mutableInstrumentations = {
+    forEach(callback) {
+        const target = this.raw
+        // 与 ITERATE_KEY 建立响应联系
+        track(target, ITERATE_KEY)
+        // 调用原始对象 forEach
+        target.forEach(callback)
+    }
+}
+```
+运行下面代码进行测试，可以正常工作
+```js
+const m = reactive(new Map([
+    [{ key: 1 }, { value: 1 }]
+]))
+effect(() => {
+    m.forEach((value, key) => {
+        console.log(value)
+        console.log(key)
+    })
+})
+m.set({ key: 2 }, { value: 2 }) // 能够触发响应
+```
+虽然可以正常工作，但上面的代码明显存在问题，通过原始对象调用了原生的 forEach 方法
+```js
+// 调用原始对象 forEach
+target.forEach(callback)
+```
+这样就导致 callback 回调函数的参数将是非响应式数据
